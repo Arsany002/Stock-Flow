@@ -13,6 +13,7 @@ use App\Repositories\Contracts\PurchaseOrderRepositoryInterface;
 use App\Repositories\Contracts\QuoteRepositoryInterface;
 use App\Repositories\Contracts\StockRepositoryInterface;
 use App\Repositories\Contracts\SupplierRepositoryInterface;
+use App\Repositories\Contracts\WarehouseRepositoryInterface;
 use App\Repositories\ImportRepository;
 use App\Repositories\OrderRepository;
 use App\Repositories\PaymentRepository;
@@ -22,6 +23,7 @@ use App\Repositories\PurchaseOrderRepository;
 use App\Repositories\QuoteRepository;
 use App\Repositories\StockRepository;
 use App\Repositories\SupplierRepository;
+use App\Repositories\WarehouseRepository;
 use Illuminate\Support\ServiceProvider;
 
 /**
@@ -41,6 +43,7 @@ class RepositoryServiceProvider extends ServiceProvider
         SupplierRepositoryInterface::class => SupplierRepository::class,
         PriceListRepositoryInterface::class => PriceListRepository::class,
         StockRepositoryInterface::class => StockRepository::class,
+        WarehouseRepositoryInterface::class => WarehouseRepository::class,
         OrderRepositoryInterface::class => OrderRepository::class,
         QuoteRepositoryInterface::class => QuoteRepository::class,
         PurchaseOrderRepositoryInterface::class => PurchaseOrderRepository::class,

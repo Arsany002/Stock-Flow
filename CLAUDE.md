@@ -47,8 +47,8 @@ Read it before proposing any architecture or scaffolding.
   business rules/transactions; Repositories own Eloquent queries; Policies own
   record-level authorization. Web and API controllers call the same Services.
 - Stock mutations: `DB::transaction()` + `lockForUpdate()`, no oversell under
-  concurrency, `stock:reconcile` proves ledger == `stock_levels`. Not implemented yet
-  (`StockService` is still a skeleton — see below).
+  concurrency, `stock:reconcile` proves ledger == `stock_levels`. **Implemented** —
+  see "Current state" below.
 
 ## Roles
 
@@ -74,13 +74,28 @@ matrix; demo users seeded by `DemoUserSeeder` (SuperAdmin) and
   enums, models, factories, and demo seeders.
 - **Shared backend architecture**: `app/Services`, `app/Repositories` (+`Contracts`),
   `app/Exceptions` (domain exceptions), `app/Payments`, `app/Support` scaffolded.
-  Only `CatalogService` and `AuthService`/`RoleAssignmentService` have real logic;
-  `StockService`, `OrderService`, `QuoteService`, `PurchaseOrderService`,
+  `CatalogService`, `AuthService`/`RoleAssignmentService`, and `StockService` have
+  real logic; `OrderService`, `QuoteService`, `PurchaseOrderService`,
   `PaymentService`, `ImportService` are still skeletons (methods throw
   `LogicException` — not implemented yet).
 - **Catalog module** (first full business module, the template for future ones):
   products/categories/suppliers/price-lists CRUD, Redis-cached reads (tag `catalog`,
   flushed on every write), vendor-scoped price-list-item ownership.
+- **Stock engine** (second full business module — see `stockflow/README.md` §"The
+  stock engine" for the full write-up): `StockService::purchaseIn() / reserve() /
+  release() / confirmSale() / transfer() / adjust() / reconcile()` — every mutation
+  transactional, row-locked (`lockForUpdate()`), no oversell, no negative stock,
+  exactly one (or two, for `transfer()`) immutable `stock_movements` row per
+  mutation. Web UI at `/stock/levels`, `/stock/movements`, `/stock/adjustments`,
+  `/stock/transfers`, `/stock/reconcile`, gated by `stock.read`/`stock.move`/
+  `stock.transfer`/`audit.read` and `StockPolicy` + `WarehouseScopeMiddleware`
+  (Laratrust team-scoped: one team per warehouse, auto-created via
+  `Warehouse::booted()`). `php artisan stock:reconcile` is CI-checkable (non-zero
+  exit on ledger/projection drift). `php artisan stock:release-expired-reservations`
+  is a skeleton only — no reservation-expiry concept exists in the schema yet.
+  Concurrency (no-oversell under a real race) is proven in
+  `tests/Feature/Stock/StockConcurrencyTest.php` via two separate OS processes
+  racing `reserve()` against real MySQL row locks.
 
 ## Known deviations from the PRD (flagged, not silently "fixed")
 
@@ -121,10 +136,26 @@ matrix; demo users seeded by `DemoUserSeeder` (SuperAdmin) and
 - **`migrate:fresh` does not touch Redis.** If you're debugging something that looks
   like stale/impossible cached data after a DB reset, run `php artisan cache:clear`
   before assuming it's a code bug.
-- **Schema/cache tests that need real MySQL/Redis semantics** (FULLTEXT, real unique
-  constraints, real serialization) can't use the suite's default SQLite/array
-  drivers. Pattern to copy: `tests/Feature/Schema/DatabaseSchemaTest.php` (switches to
-  a dedicated `stockflow_testing` MySQL DB, never the dev DB) and
+- **Schema/cache/concurrency tests that need real MySQL/Redis semantics** (FULLTEXT,
+  real unique constraints, real row locking, real serialization) can't use the
+  suite's default SQLite/array drivers. Pattern to copy:
+  `tests/Concerns/UsesRealMysqlDatabase.php` (a shared trait — switches to a
+  dedicated `stockflow_testing` MySQL DB, never the dev DB; used by
+  `DatabaseSchemaTest` and `StockConcurrencyTest`) and
   `tests/Feature/Catalog/CatalogCacheTest.php`'s
   `test_catalog_cache_survives_a_real_redis_round_trip` (switches `cache.default` to
-  `redis` for one test, restores it in `finally`).
+  `redis` for one test, restores it in `finally`). For proving no-oversell under a
+  genuine race (not just correctness in isolation), PHPUnit is single-threaded, so
+  `StockConcurrencyTest` spawns two real OS processes via `proc_open()`
+  (`tests/Concurrency/reserve_once.php`, a standalone script that boots its own
+  Laravel app instance) rather than trying to fake concurrency within one process.
+- **A subclass redeclaring a parent's `$fillable`/`$guarded` doesn't erase the
+  parent's.** `App\Models\Team extends Laratrust\Models\Team`, which already
+  declares a non-empty `protected $fillable = ['name', 'display_name',
+  'description']`. Setting `public $guarded = []` on the child does nothing —
+  Eloquent's `isFillable()` checks `$fillable` first whenever it's non-empty, so
+  `warehouse_id` (added via a migration to link warehouses ↔ Laratrust teams) was
+  silently stripped from every mass-assignment. Fix: redeclare `$fillable` itself in
+  the child, including the new column. If a mass-assignment to a subclassed model
+  silently drops a column that's clearly in `$guarded = []`, check whether a parent
+  class already declares `$fillable`.

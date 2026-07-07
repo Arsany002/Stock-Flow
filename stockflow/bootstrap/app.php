@@ -1,6 +1,8 @@
 <?php
 
+use App\Exceptions\UnauthorizedWarehouseException;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\WarehouseScopeMiddleware;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -19,6 +21,10 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [
             HandleInertiaRequests::class,
         ]);
+
+        $middleware->alias([
+            'warehouse.scope' => WarehouseScopeMiddleware::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
@@ -26,6 +32,16 @@ return Application::configure(basePath: dirname(__DIR__))
         );
 
         $exceptions->render(function (AuthorizationException $e, Request $request) {
+            if ($request->is('api/*')) {
+                return null;
+            }
+
+            return Inertia::render('Errors/Forbidden')
+                ->toResponse($request)
+                ->setStatusCode(403);
+        });
+
+        $exceptions->render(function (UnauthorizedWarehouseException $e, Request $request) {
             if ($request->is('api/*')) {
                 return null;
             }

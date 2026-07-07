@@ -10,6 +10,11 @@ use App\Http\Controllers\Web\Catalog\PriceListItemController;
 use App\Http\Controllers\Web\Catalog\ProductController;
 use App\Http\Controllers\Web\Catalog\SupplierController;
 use App\Http\Controllers\Web\DashboardController;
+use App\Http\Controllers\Web\Stock\StockAdjustmentController;
+use App\Http\Controllers\Web\Stock\StockLevelController;
+use App\Http\Controllers\Web\Stock\StockMovementController;
+use App\Http\Controllers\Web\Stock\StockReconciliationController;
+use App\Http\Controllers\Web\Stock\StockTransferController;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 
@@ -98,5 +103,30 @@ Route::middleware('auth')->group(function () {
             ->name('price-list-items.update')->middleware('permission:pricelist.manage');
         Route::delete('/price-list-items/{priceListItem}', [PriceListItemController::class, 'destroy'])
             ->name('price-list-items.destroy')->middleware('permission:pricelist.manage');
+    });
+
+    Route::prefix('stock')->name('stock.')->group(function () {
+        Route::get('/levels', [StockLevelController::class, 'index'])
+            ->name('levels.index')->middleware('permission:stock.read');
+
+        Route::get('/movements', [StockMovementController::class, 'index'])
+            ->name('movements.index')->middleware('permission:stock.read');
+
+        // Route order matters: /adjustments/create must be registered
+        // before a wildcard could ever be added under /adjustments.
+        Route::get('/adjustments/create', [StockAdjustmentController::class, 'create'])
+            ->name('adjustments.create')->middleware('permission:stock.move');
+        Route::post('/adjustments', [StockAdjustmentController::class, 'store'])
+            ->name('adjustments.store')->middleware(['permission:stock.move', 'warehouse.scope:stock.move']);
+
+        Route::get('/transfers/create', [StockTransferController::class, 'create'])
+            ->name('transfers.create')->middleware('permission:stock.transfer');
+        Route::post('/transfers', [StockTransferController::class, 'store'])
+            ->name('transfers.store')->middleware(['permission:stock.transfer', 'warehouse.scope:stock.transfer']);
+
+        Route::get('/reconcile', [StockReconciliationController::class, 'show'])
+            ->name('reconcile.show')->middleware('permission:stock.move|audit.read');
+        Route::post('/reconcile', [StockReconciliationController::class, 'run'])
+            ->name('reconcile.run')->middleware('permission:stock.move|audit.read');
     });
 });

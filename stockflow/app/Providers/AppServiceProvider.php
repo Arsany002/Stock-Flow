@@ -5,8 +5,10 @@ namespace App\Providers;
 use App\Models\PriceList;
 use App\Models\PriceListItem;
 use App\Models\Product;
+use App\Models\Warehouse;
 use App\Policies\PriceListPolicy;
 use App\Policies\ProductPolicy;
+use App\Policies\StockPolicy;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
@@ -30,5 +32,6 @@ class AppServiceProvider extends ServiceProvider
         // PriceListPolicy also covers PriceListItem (own-item checks) —
         // see docs/project/canonical-decisions.md §2 and the policy's docblock.
         Gate::policy(PriceListItem::class, PriceListPolicy::class);
+        Gate::policy(Warehouse::class, StockPolicy::class);
     }
 }

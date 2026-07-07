@@ -26,11 +26,9 @@ use App\Models\Supplier;
 use App\Models\User;
 use App\Models\Warehouse;
 use Illuminate\Database\QueryException;
-use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use PDO;
+use Tests\Concerns\UsesRealMysqlDatabase;
 use Tests\TestCase;
 
 /**
@@ -46,57 +44,27 @@ use Tests\TestCase;
  */
 class DatabaseSchemaTest extends TestCase
 {
-    private static bool $migrated = false;
+    use UsesRealMysqlDatabase;
 
-    private string $originalDefaultConnection;
+    private static bool $migrated = false;
 
     protected function setUp(): void
     {
         parent::setUp();
 
-        $this->originalDefaultConnection = Config::get('database.default');
-
-        $this->useDedicatedMysqlTestDatabase();
+        $this->useRealMysqlDatabase();
 
         if (! self::$migrated) {
-            Artisan::call('migrate:fresh', ['--database' => 'mysql', '--force' => true]);
+            $this->migrateRealMysqlDatabaseOnce();
             self::$migrated = true;
         }
     }
 
     protected function tearDown(): void
     {
-        // Restore the suite's default (SQLite in-memory) so switching to
-        // MySQL here can never bleed into other test classes regardless of
-        // run order.
-        Config::set('database.default', $this->originalDefaultConnection);
-        DB::purge('mysql');
+        $this->restoreOriginalDatabaseConnection();
 
         parent::tearDown();
-    }
-
-    private function useDedicatedMysqlTestDatabase(): void
-    {
-        $testDatabase = env('DB_TEST_DATABASE', 'stockflow_testing');
-        $appUser = env('DB_USERNAME', 'stockflow');
-
-        // The app's normal DB user only has grants on the dev database, so
-        // bootstrap the dedicated test database (and its grant) as root.
-        $root = new PDO(
-            sprintf('mysql:host=%s;port=%s', env('DB_HOST', 'mysql'), env('DB_PORT', 3306)),
-            'root',
-            env('DB_ROOT_PASSWORD', 'stockflow_root')
-        );
-        $root->exec(
-            "CREATE DATABASE IF NOT EXISTS `{$testDatabase}` ".
-            'DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_unicode_ci'
-        );
-        $root->exec("GRANT ALL PRIVILEGES ON `{$testDatabase}`.* TO '{$appUser}'@'%'");
-        $root->exec('FLUSH PRIVILEGES');
-
-        Config::set('database.connections.mysql.database', $testDatabase);
-        Config::set('database.default', 'mysql');
-        DB::purge('mysql');
     }
 
     public function test_migrations_run_successfully(): void
