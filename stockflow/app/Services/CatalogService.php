@@ -265,6 +265,39 @@ class CatalogService
         return $deleted;
     }
 
+    /**
+     * The applicable retail (B2C) unit price for a product at a given
+     * quantity — the active `b2c_retail` price list's item with the
+     * highest `min_qty` that's still `<= $quantity`. Used by
+     * OrderService::checkout() to price order lines server-side; see
+     * requirement #2/#3 in the B2C checkout module (totals computed
+     * server-side, retail price list applies).
+     */
+    public function retailPriceFor(string $productId, int $quantity = 1): ?PriceListItem
+    {
+        return $this->remember(
+            $this->cacheKey('retail_price', $productId, $quantity),
+            fn () => $this->priceLists->activeRetailItemFor($productId, $quantity)
+        );
+    }
+
+    /**
+     * The applicable B2B tier unit price for a product at a given quantity
+     * — the active `b2b_tier` price list's item with the highest `min_qty`
+     * that's still `<= $quantity`. Used only as a *suggested* starting
+     * price when a Vendor/Inventory Manager prices a quote line
+     * (QuoteService::price()) — the actual submitted unit_price can
+     * override it, since a quote is a negotiated price, not a fixed
+     * catalog lookup like B2C checkout.
+     */
+    public function tierPriceFor(string $productId, int $quantity = 1): ?PriceListItem
+    {
+        return $this->remember(
+            $this->cacheKey('tier_price', $productId, $quantity),
+            fn () => $this->priceLists->activeTierItemFor($productId, $quantity)
+        );
+    }
+
     // ---------------------------------------------------------------
 
     private function remember(string $key, \Closure $callback): mixed

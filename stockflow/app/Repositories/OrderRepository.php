@@ -2,9 +2,11 @@
 
 namespace App\Repositories;
 
+use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Repositories\Contracts\OrderRepositoryInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
 
 class OrderRepository implements OrderRepositoryInterface
 {
@@ -31,5 +33,14 @@ class OrderRepository implements OrderRepositoryInterface
         $order->update($attributes);
 
         return $order;
+    }
+
+    public function expiredReservations(): Collection
+    {
+        return Order::query()
+            ->where('status', OrderStatus::Reserved)
+            ->whereNotNull('reserved_until')
+            ->where('reserved_until', '<', now())
+            ->get();
     }
 }

@@ -23,4 +23,18 @@ class OutOfStockException extends DomainException
             ]
         );
     }
+
+    /**
+     * No single active warehouse can cover the full requested quantity —
+     * thrown by OrderService::checkout() before it even attempts a
+     * reserve() call, since StockService::bestWarehouseFor() found nowhere
+     * to place the line.
+     */
+    public static function noWarehouseAvailable(string $productId, int $requested): self
+    {
+        return new self(
+            "No warehouse has {$requested} unit(s) of product [{$productId}] available.",
+            ['product_id' => $productId, 'requested' => $requested]
+        );
+    }
 }

@@ -156,4 +156,15 @@ class StockRepository implements StockRepositoryInterface
                 'ledger_reserved' => (int) $row->ledger_reserved,
             ]);
     }
+
+    public function levelsForProductOrderedByAvailability(string $productId): Collection
+    {
+        return StockLevel::query()
+            ->where('product_id', $productId)
+            ->whereHas('warehouse', fn ($query) => $query->where('is_active', true))
+            ->with('warehouse')
+            ->get()
+            ->sortByDesc(fn (StockLevel $level) => $level->available)
+            ->values();
+    }
 }

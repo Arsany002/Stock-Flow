@@ -21,6 +21,11 @@ class PurchaseOrderRepository implements PurchaseOrderRepositoryInterface
             ->paginate($perPage);
     }
 
+    public function paginateAll(int $perPage = 15): LengthAwarePaginator
+    {
+        return PurchaseOrder::query()->latest()->paginate($perPage);
+    }
+
     public function create(array $attributes): PurchaseOrder
     {
         return PurchaseOrder::query()->create($attributes);

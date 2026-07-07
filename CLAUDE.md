@@ -74,9 +74,9 @@ matrix; demo users seeded by `DemoUserSeeder` (SuperAdmin) and
   enums, models, factories, and demo seeders.
 - **Shared backend architecture**: `app/Services`, `app/Repositories` (+`Contracts`),
   `app/Exceptions` (domain exceptions), `app/Payments`, `app/Support` scaffolded.
-  `CatalogService`, `AuthService`/`RoleAssignmentService`, and `StockService` have
-  real logic; `OrderService`, `QuoteService`, `PurchaseOrderService`,
-  `PaymentService`, `ImportService` are still skeletons (methods throw
+  `CatalogService`, `AuthService`/`RoleAssignmentService`, `StockService`,
+  `OrderService`, `PaymentService`, `QuoteService`, and `PurchaseOrderService` have
+  real logic; only `ImportService` is still a skeleton (methods throw
   `LogicException` — not implemented yet).
 - **Catalog module** (first full business module, the template for future ones):
   products/categories/suppliers/price-lists CRUD, Redis-cached reads (tag `catalog`,
@@ -91,11 +91,78 @@ matrix; demo users seeded by `DemoUserSeeder` (SuperAdmin) and
   `stock.transfer`/`audit.read` and `StockPolicy` + `WarehouseScopeMiddleware`
   (Laratrust team-scoped: one team per warehouse, auto-created via
   `Warehouse::booted()`). `php artisan stock:reconcile` is CI-checkable (non-zero
-  exit on ledger/projection drift). `php artisan stock:release-expired-reservations`
-  is a skeleton only — no reservation-expiry concept exists in the schema yet.
-  Concurrency (no-oversell under a real race) is proven in
-  `tests/Feature/Stock/StockConcurrencyTest.php` via two separate OS processes
-  racing `reserve()` against real MySQL row locks.
+  exit on ledger/projection drift). Concurrency (no-oversell under a real race) is
+  proven in `tests/Feature/Stock/StockConcurrencyTest.php` via two separate OS
+  processes racing `reserve()` against real MySQL row locks.
+- **B2C checkout module** (third full business module — cart → checkout →
+  payment → fulfillment): `OrderService` owns the state machine `pending →
+  reserved → confirmed → fulfilled` (with `reserved`/`pending` → `cancelled`);
+  every stock mutation is delegated to `StockService::reserve()` /
+  `confirmSale()` / `release()` — `OrderService` never writes `stock_movements`
+  itself. `checkout()` prices lines from the active `b2c_retail` price list
+  (`CatalogService::retailPriceFor()`), picks a fulfillment warehouse per line
+  (`StockService::bestWarehouseFor()` — most-available-stock heuristic, not a
+  customer choice in v1), and reserves every line inside one `DB::transaction()`
+  — any line failing (`OutOfStockException`/`PricingUnavailableException`) rolls
+  back the whole checkout, including the `Order`/`OrderItem` rows themselves, so
+  a failed checkout leaves zero trace. VAT is a fixed 14% (`OrderService::
+  VAT_RATE`), computed with `bcmath` (not float math) to avoid rounding drift on
+  money. `orders.reserved_until` (30 min from checkout,
+  `OrderService::RESERVATION_TTL_MINUTES`) is released by `php artisan
+  stock:release-expired-reservations` (now fully implemented, scheduled
+  every-minute in `routes/console.php`) via `OrderService::
+  releaseExpiredReservations()` → `cancel()`.
+  Payment methods (`PaymentMethod` enum + one driver each under `app/Payments`,
+  resolved by `PaymentService::resolveGateway()`): `cod` and `fake` are fully
+  wired (`fake` resolves synchronously at checkout via `$options['outcome']` —
+  demo/test only, no real gateway); `paymob`/`fawry` are placeholders
+  (`PaymentMethod::isPlaceholder()`) that leave the payment `pending` for manual
+  settlement rather than throwing. Staff (`payment.settle`) settle a pending
+  payment via `POST /payments/{payment}/settle` →
+  `PaymentService::settleManually()` + `OrderService::confirmPayment()`. Real
+  Paymob/Fawry integration (webhook signature verification under
+  `/webhooks/v1`) is still future work — `PaymentService::verifyWebhook()`
+  throws. Web UI at `/cart`, `/checkout`, `/orders`, `/orders/{order}`,
+  `/payments/{payment}`, gated by `sale.create` (checkout) and
+  `OrderPolicy`/`PaymentPolicy` (record-level: a customer sees only their own
+  orders/payments; staff holding `payment.settle` can see and settle any).
+  Cart is session-backed (`CartService`, `[product_id => quantity]` in the
+  Laravel session) — deliberately not a DB table, since requirement #1 only
+  requires *order creation* to be database-backed, and prices are always looked
+  up fresh rather than cached in the session.
+- **B2B procurement module** (fourth full business module — RFQ → quote → PO →
+  approval → settlement): two state machines, `QuoteService` (`draft → sent →
+  accepted | rejected | expired`) and `PurchaseOrderService` (`pending_approval →
+  approved → fulfilled → closed`, or `pending_approval → rejected`). A Business
+  Buyer's `request()` creates a `draft` quote with lines but no prices
+  (`quote_items.unit_price` starts at `0.00`); a Vendor (their own products only —
+  "own pricing context", `QuotePolicy::price()`) or Inventory Manager prices every
+  line and the quote moves to `sent` with a 14-day expiry
+  (`QuoteService::VALIDITY_DAYS`). `QuoteService::accept()` is never called from a
+  controller directly — only `PurchaseOrderService::createFromQuote()` calls it,
+  inside the same `DB::transaction()` that creates the `PurchaseOrder` +
+  `PoItem`s, so "accept the quote" and "create the PO" always happen together or
+  neither does. **Creating the PO does NOT reserve stock** — it only picks a
+  fulfillment warehouse per line (`StockService::bestWarehouseFor()`, same
+  heuristic as B2C); reservation happens only at `approve()` time. `approve()`
+  locks the `business_accounts` row (`BusinessAccountRepository::lockForUpdate()`,
+  so two concurrent approvals against the same account can't both pass against a
+  stale balance), checks `outstanding_balance + PO total <= credit_limit`
+  (`bccomp`, not float comparison — throws `CreditLimitExceededException` if it
+  would be exceeded), then reserves every line via `StockService::reserve()` and
+  adds the PO total to `outstanding_balance`. Bank Transfer settlement
+  (`PurchaseOrderController::bankTransferStore()`) calls
+  `PaymentService::initiate()` + `settleManually()` (reusing the B2C module's
+  `ManualSettlementGateway`) then `PurchaseOrderService::settle()`, which converts
+  every line's reservation to a sale via `StockService::confirmSale()` and pays
+  down `outstanding_balance` — mirrors B2C `confirmPayment()`, but also touches
+  the credit ledger. Web UI at `/procurement/quotes/*` and
+  `/procurement/purchase-orders/*`, gated by `quote.request` (Business Buyer),
+  `quote.price` (Vendor/Inventory Manager), `po.approve`, `payment.settle`, with
+  `QuotePolicy`/`PurchaseOrderPolicy` doing "own account" / "own pricing context"
+  record-level scoping (staff holding `po.approve`/`payment.settle` can see/act on
+  any). `PaymentPolicy` now branches on payable type (`Order` for B2C,
+  `PurchaseOrder` for B2B) since both share the polymorphic `payments` table.
 
 ## Known deviations from the PRD (flagged, not silently "fixed")
 
@@ -159,3 +226,20 @@ matrix; demo users seeded by `DemoUserSeeder` (SuperAdmin) and
   the child, including the new column. If a mass-assignment to a subclassed model
   silently drops a column that's clearly in `$guarded = []`, check whether a parent
   class already declares `$fillable`.
+- **Widening a `$table->enum()` column later must use `Blueprint::change()`, not raw
+  `ALTER TABLE ... MODIFY ... ENUM(...)`.** Adding `PaymentMethod::Fake` required
+  widening `payments.method`'s enum values after the fact. Raw SQL (`DB::statement`)
+  is MySQL-only syntax and breaks the test suite's default SQLite `:memory:`
+  connection outright (no `ENUM` type, no `MODIFY COLUMN`). `Schema::table(...,
+  fn ($table) => $table->enum('method', [...])->change())` works on both — see
+  `database/migrations/2026_07_07_222923_add_fake_to_payments_method_enum.php`.
+  Verify any enum-widening migration against both `php artisan test` (SQLite) and
+  `php artisan migrate` in the `app` container (MySQL) before considering it done.
+- **A generic `App\Exceptions\DomainException` render handler in `bootstrap/app.php`
+  redirects back with `flash.error`** (registered after the more specific
+  `AuthorizationException`/`UnauthorizedWarehouseException` handlers, so those still
+  win for their subtypes). Any new domain exception — `OutOfStockException`,
+  `PricingUnavailableException`, `InvalidStateTransitionException`, etc. — gets this
+  "clean rejection" behavior for free in web controllers; don't add a per-exception
+  try/catch in a controller unless it needs a different response than a flash-error
+  redirect back.

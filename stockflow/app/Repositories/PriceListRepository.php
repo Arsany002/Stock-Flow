@@ -2,6 +2,7 @@
 
 namespace App\Repositories;
 
+use App\Enums\PriceListType;
 use App\Models\PriceList;
 use App\Models\PriceListItem;
 use App\Repositories\Contracts\PriceListRepositoryInterface;
@@ -54,5 +55,27 @@ class PriceListRepository implements PriceListRepositoryInterface
     public function deleteItem(PriceListItem $item): bool
     {
         return (bool) $item->delete();
+    }
+
+    public function activeRetailItemFor(string $productId, int $quantity): ?PriceListItem
+    {
+        return $this->activeItemFor(PriceListType::B2cRetail, $productId, $quantity);
+    }
+
+    public function activeTierItemFor(string $productId, int $quantity): ?PriceListItem
+    {
+        return $this->activeItemFor(PriceListType::B2bTier, $productId, $quantity);
+    }
+
+    private function activeItemFor(PriceListType $type, string $productId, int $quantity): ?PriceListItem
+    {
+        return PriceListItem::query()
+            ->whereHas('priceList', fn ($query) => $query
+                ->where('type', $type)
+                ->where('is_active', true))
+            ->where('product_id', $productId)
+            ->where('min_qty', '<=', $quantity)
+            ->orderByDesc('min_qty')
+            ->first();
     }
 }

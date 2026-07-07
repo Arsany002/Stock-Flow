@@ -1,5 +1,6 @@
 <?php
 
+use App\Exceptions\DomainException;
 use App\Exceptions\UnauthorizedWarehouseException;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\WarehouseScopeMiddleware;
@@ -49,6 +50,22 @@ return Application::configure(basePath: dirname(__DIR__))
             return Inertia::render('Errors/Forbidden')
                 ->toResponse($request)
                 ->setStatusCode(403);
+        });
+
+        // Generic fallback for any other domain-rule failure (OutOfStock,
+        // PricingUnavailable, InvalidStateTransition, ...) — registered
+        // after the more specific UnauthorizedWarehouseException handler
+        // above, which still wins for that subtype. Redirects back with a
+        // flash error rather than a 500 page, so e.g. checkout failing
+        // because a line went out of stock mid-request reads as "cleanly
+        // rejected", not "server broke" — see requirement #6 of the B2C
+        // checkout module.
+        $exceptions->render(function (DomainException $e, Request $request) {
+            if ($request->is('api/*')) {
+                return null;
+            }
+
+            return back()->with('flash.error', $e->getMessage());
         });
 
         $exceptions->render(function (NotFoundHttpException $e, Request $request) {

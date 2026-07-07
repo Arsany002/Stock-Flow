@@ -22,8 +22,16 @@ ledger — `php artisan stock:reconcile` proves it.
   transactional and row-locked (see "The stock engine" below), plus a web UI
   (`/stock/levels`, `/stock/movements`, `/stock/adjustments`, `/stock/transfers`,
   `/stock/reconcile`) and `php artisan stock:reconcile`.
-- Not yet built: B2C checkout, B2B quote/PO workflow, Excel import, payments,
-  Laravel Passport (`/api/v1`), payment webhooks.
+- **B2C checkout module**: session-backed cart → checkout → payment → fulfillment.
+  `OrderService` owns `pending → reserved → confirmed → fulfilled` (or `cancelled`);
+  see "B2C checkout" below. Web UI at `/cart`, `/checkout`, `/orders`, `/orders/
+  {order}`, `/payments/{payment}`.
+- **B2B procurement module**: RFQ → quote → purchase order → approval → Bank
+  Transfer settlement. `QuoteService` + `PurchaseOrderService` own two linked
+  state machines; see "B2B procurement" below. Web UI at `/procurement/quotes/*`
+  and `/procurement/purchase-orders/*`.
+- Not yet built: Excel import, Laravel Passport (`/api/v1`), real Paymob/Fawry
+  gateway integration, payment webhooks (`/webhooks/v1`).
 
 ## Requirements
 
@@ -43,8 +51,11 @@ docker compose exec app php artisan db:seed   # demo roles/users/warehouses/cata
 `shell`, `migrate`, `fresh`, `test`, `npm-dev`, `npm-build`).
 
 Visit `http://127.0.0.1:8000`. Guests are redirected to `/login`; authenticated users
-land on `/dashboard`. `DemoUserSeeder` creates a SuperAdmin login (`RolePermissionSeeder`
-must run first — `db:seed` runs seeders in order, so a plain `db:seed` is enough).
+land on `/dashboard`. `DemoUserSeeder` creates a SuperAdmin login and
+`DemoBusinessAccountSeeder` creates a Business Buyer login (`buyer@stockflow.test`,
+password `password`) with a linked `business_accounts` row — both need
+`RolePermissionSeeder` to have run first, which a plain `db:seed` handles since
+seeders run in order.
 
 ## Local setup (without Docker)
 
@@ -119,19 +130,87 @@ that the acting user's Laratrust team includes every warehouse a `stock.move` /
 bypasses team scoping. See `docs/project/canonical-decisions.md` §3/§6 for the full
 rationale.
 
+## B2C checkout
+
+`OrderService` state machine: `pending → reserved → confirmed → fulfilled`, or
+`pending`/`reserved → cancelled`. Every stock mutation is delegated to
+`StockService` (`reserve()`/`confirmSale()`/`release()`) — `OrderService` never
+writes `stock_movements` itself.
+
+`checkout()` prices every cart line from the active `b2c_retail` price list
+(`CatalogService::retailPriceFor()`), picks a fulfillment warehouse
+(`StockService::bestWarehouseFor()` — most-available-stock heuristic, not a
+customer choice), and reserves every line inside one `DB::transaction()`. Any line
+failing rolls back the whole checkout — no `Order`/`OrderItem` row is left behind.
+VAT is a fixed 14%, computed with `bcmath` to avoid float rounding drift on money.
+`orders.reserved_until` (30 minutes from checkout) is released by
+`php artisan stock:release-expired-reservations`, scheduled every minute.
+
+Payment methods (`app/Payments/*Gateway.php`, resolved by
+`PaymentService::resolveGateway()`): `cod` and `fake` are fully wired (`fake`
+resolves synchronously at checkout — demo/test only); `paymob`/`fawry` are
+placeholders that leave the payment `pending` for manual settlement. Cart is
+session-backed (`CartService`) — not a DB table, since only *order creation* is
+required to be database-backed.
+
+## B2B procurement
+
+Two linked state machines:
+
+- **Quote** (`QuoteService`): `draft → sent → accepted | rejected | expired`.
+  `request()` creates a `draft` quote from a Business Buyer's desired
+  products/quantities — no prices yet. A Vendor (their own products only — "own
+  pricing context") or Inventory Manager prices every line via `price()`, which
+  moves the quote to `sent` with a 14-day expiry. The Business Buyer then
+  `accept()`s or `reject()`s it.
+- **Purchase Order** (`PurchaseOrderService`): `pending_approval → approved →
+  fulfilled → closed`, or `pending_approval → rejected`.
+
+`QuoteService::accept()` is never called from a controller directly — only
+`PurchaseOrderService::createFromQuote()` calls it, inside the same
+`DB::transaction()` that creates the `PurchaseOrder` and its `PoItem`s, so
+"accept the quote" and "create the PO" always happen together or neither does.
+**Creating the PO does not reserve stock** — it only picks a fulfillment warehouse
+per line; reservation happens only when an approver calls `approve()`.
+
+`approve()`:
+1. locks the `business_accounts` row (`BusinessAccountRepository::lockForUpdate()`
+   — so two concurrent approvals against the same account can't both pass against
+   a stale balance);
+2. checks `outstanding_balance + PO total <= credit_limit` (via `bccomp`, not
+   float comparison) — throws `CreditLimitExceededException` if it would be
+   exceeded, leaving the PO untouched (`pending_approval`, no stock reserved);
+3. records a `po_approvals` row, reserves every line via `StockService::reserve()`,
+   and adds the PO total to `outstanding_balance` (the buyer now owes it under net
+   terms).
+
+Bank Transfer settlement (`POST /procurement/purchase-orders/{po}/bank-transfer`)
+initiates and immediately settles a `Payment` (reusing the B2C module's
+`PaymentService`/`ManualSettlementGateway`), then `PurchaseOrderService::settle()`
+converts every line's reservation into a completed sale
+(`StockService::confirmSale()`) and pays down `outstanding_balance` — mirrors B2C's
+`confirmPayment()`, but also touches the credit ledger.
+
+`QuotePolicy`/`PurchaseOrderPolicy` enforce "own account" (Business Buyer) / "own
+pricing context" (Vendor) record-level scoping; staff holding `po.approve` or
+`payment.settle` can see/act on any. `PaymentPolicy` branches on payable type
+(`Order` for B2C, `PurchaseOrder` for B2B) since both share the polymorphic
+`payments` table.
+
 ## Project structure notes
 
 - `routes/web.php` — Inertia page routes only (session/`web` guard). No API routes.
 - `app/Http/Controllers/Web/` — Inertia controllers, one folder per module
-  (`Auth/`, `Admin/`, `Catalog/`, `Stock/`). Future API controllers will live under
-  `app/Http/Controllers/Api/V1/` and payment webhooks under a `Webhooks/` group —
-  neither exists yet.
+  (`Auth/`, `Admin/`, `Catalog/`, `Stock/`, `Sales/`, `Procurement/`). Future API
+  controllers will live under `app/Http/Controllers/Api/V1/` and payment webhooks
+  under a `Webhooks/` group — neither exists yet.
 - Layering: **Controller → FormRequest → Service → Repository → Model.** Controllers
   never call Eloquent directly; FormRequests own `authorize()`/`rules()`; Services
   own business rules/transactions; Repositories own Eloquent queries; Policies own
   record-level authorization.
 - `resources/js/Pages/` — Inertia pages, resolved by `resources/js/app.jsx`, one
-  folder per module (`Auth/`, `Admin/`, `Catalog/`, `Stock/`).
+  folder per module (`Auth/`, `Admin/`, `Catalog/`, `Stock/`, `Sales/`,
+  `Procurement/`).
 - `resources/js/Layouts/` — `AppLayout` (authenticated shell, renders
   `FlashMessage`) and `GuestLayout` (centered card, used by the login page).
 - `resources/js/Components/` — shared UI primitives: `Button`, `Input`, `Select`,
@@ -139,9 +218,8 @@ rationale.
 - `app/Http/Middleware/HandleInertiaRequests.php` — shares `auth.user`,
   `auth.roles`, `auth.permissions`, and `flash.success`/`flash.error` on every
   Inertia response.
-- `app/Console/Commands/` — `stock:reconcile` (implemented),
-  `stock:release-expired-reservations` (skeleton — no reservation-expiry concept
-  exists in the schema yet).
+- `app/Console/Commands/` — `stock:reconcile` and
+  `stock:release-expired-reservations` (both fully implemented and scheduled).
 
 ## Permissions (Laratrust)
 
@@ -154,7 +232,6 @@ Seeded by `RolePermissionSeeder` per the Enterprise PRD §3 permission matrix:
 ## Not yet built
 
 - Laravel Passport (external B2B API under `/api/v1`).
-- Payment webhooks (`/webhooks/v1`).
-- B2C checkout, B2B quote/PO workflow, Excel import, payments.
-- `stock:release-expired-reservations` (skeleton only — needs a reservation-expiry
-  concept added to the schema first).
+- Payment webhooks (`/webhooks/v1`) and real Paymob/Fawry gateway integration
+  (`PaymentService::verifyWebhook()` still throws — see `app/Payments/`).
+- Excel import (`ImportService` is still a skeleton).

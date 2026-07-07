@@ -4,6 +4,7 @@ namespace App\Repositories\Contracts;
 
 use App\Models\Order;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
 
 interface OrderRepositoryInterface
 {
@@ -20,4 +21,14 @@ interface OrderRepositoryInterface
      * @param  array<string, mixed>  $attributes
      */
     public function update(Order $order, array $attributes): Order;
+
+    /**
+     * `reserved` orders whose `reserved_until` has passed — unpaid
+     * reservations due for release. Used by
+     * OrderService::releaseExpiredReservations() /
+     * `stock:release-expired-reservations`.
+     *
+     * @return Collection<int, Order>
+     */
+    public function expiredReservations(): Collection;
 }

@@ -87,6 +87,23 @@ class StockService
         return $this->warehouses->active();
     }
 
+    /**
+     * Picks a fulfillment warehouse for a B2C order line: the active
+     * warehouse with the most available (on_hand - reserved) stock for this
+     * product, as long as it can cover the full requested quantity. Read
+     * -only placement heuristic, not a stock mutation — the caller (
+     * OrderService) still must reserve the chosen warehouse's row through
+     * reserve() below, which does the real lockForUpdate() check. Returns
+     * null if no single warehouse can fulfill the full quantity.
+     */
+    public function bestWarehouseFor(Product $product, int $quantity): ?Warehouse
+    {
+        return $this->stock
+            ->levelsForProductOrderedByAvailability($product->id)
+            ->first(fn (StockLevel $level) => $level->available >= $quantity)
+            ?->warehouse;
+    }
+
     public function purchaseIn(
         Product $product,
         Warehouse $warehouse,

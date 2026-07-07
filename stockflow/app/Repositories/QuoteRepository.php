@@ -21,6 +21,19 @@ class QuoteRepository implements QuoteRepositoryInterface
             ->paginate($perPage);
     }
 
+    public function paginateForVendor(int $vendorUserId, int $perPage = 15): LengthAwarePaginator
+    {
+        return Quote::query()
+            ->whereHas('items.product.supplier', fn ($query) => $query->where('user_id', $vendorUserId))
+            ->latest()
+            ->paginate($perPage);
+    }
+
+    public function paginateAll(int $perPage = 15): LengthAwarePaginator
+    {
+        return Quote::query()->latest()->paginate($perPage);
+    }
+
     public function create(array $attributes): Quote
     {
         return Quote::query()->create($attributes);

@@ -84,4 +84,15 @@ interface StockRepositoryInterface
      * @return Collection<int, object{product_id: string, warehouse_id: string, ledger_on_hand: int, ledger_reserved: int}>
      */
     public function ledgerTotals(?string $productId = null, ?string $warehouseId = null): Collection;
+
+    /**
+     * All stock_levels rows for a product in active warehouses, with
+     * `warehouse` eager-loaded, ordered by available (on_hand - reserved)
+     * descending. Used by StockService::bestWarehouseFor() to place a B2C
+     * order line. Read-only — no lock, since it's a placement heuristic,
+     * not a mutation.
+     *
+     * @return Collection<int, StockLevel>
+     */
+    public function levelsForProductOrderedByAvailability(string $productId): Collection;
 }

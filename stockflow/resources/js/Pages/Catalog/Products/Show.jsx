@@ -1,14 +1,25 @@
-import { Head, Link, router } from '@inertiajs/react';
+import { Head, Link, router, useForm } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import Breadcrumbs from '@/Components/Breadcrumbs';
 import Button from '@/Components/Button';
+import Input from '@/Components/Input';
 import PermissionGate from '@/Components/PermissionGate';
 
 export default function Show({ product }) {
+    const { data, setData, post, processing, errors } = useForm({
+        product_id: product.id,
+        quantity: 1,
+    });
+
     function destroy() {
         if (confirm(`Delete product "${product.name}"? This cannot be undone.`)) {
             router.delete(`/catalog/products/${product.id}`);
         }
+    }
+
+    function addToCart(event) {
+        event.preventDefault();
+        post('/cart', { preserveScroll: true });
     }
 
     return (
@@ -41,6 +52,28 @@ export default function Show({ product }) {
                         </div>
                     </PermissionGate>
                 </div>
+
+                <PermissionGate permission="sale.create">
+                    <form onSubmit={addToCart} className="flex items-end gap-3 rounded-lg bg-white p-4 shadow-sm ring-1 ring-gray-200">
+                        <div className="w-24">
+                            <Input
+                                label="Quantity"
+                                name="quantity"
+                                type="number"
+                                min="1"
+                                value={data.quantity}
+                                error={errors.quantity}
+                                onChange={(e) => setData('quantity', e.target.value)}
+                            />
+                        </div>
+                        <Button type="submit" disabled={processing}>
+                            Add to cart
+                        </Button>
+                        <Link href="/cart" className="text-sm text-gray-500 underline">
+                            View cart
+                        </Link>
+                    </form>
+                </PermissionGate>
 
                 <div className="grid grid-cols-1 gap-4 rounded-lg bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:grid-cols-2">
                     <div>

@@ -2,24 +2,34 @@
 
 namespace App\Console\Commands;
 
+use App\Services\OrderService;
 use Illuminate\Console\Command;
 
 /**
- * Skeleton only — releasing expired reservations needs a reservation-expiry
- * concept (e.g. a checkout hold's `expires_at`) that doesn't exist in the
- * schema yet. Once that's designed, this should page through expired holds
- * and call StockService::release() for each, per-row, so a single stuck row
- * can't block the rest of the batch.
+ * Releases every B2C order reservation whose `orders.reserved_until` has
+ * passed without payment — the counterpart to StockService's "no oversell"
+ * guarantee (an abandoned/unpaid checkout can't hold stock hostage
+ * indefinitely). Each release goes through OrderService::cancel(), which
+ * calls StockService::release() per line inside its own transaction, so one
+ * bad row can't block the rest of the batch.
+ *
+ * Registered on the scheduler (routes/console.php) to run every minute —
+ * see requirement #6: the scheduled *job* wiring is intentionally minimal
+ * (a plain Schedule::command(), no dedicated queued Job class/retry/backoff
+ * policy), since the release logic itself needed to be fully correct, not
+ * the scheduling infrastructure around it.
  */
 class StockReleaseExpiredReservationsCommand extends Command
 {
     protected $signature = 'stock:release-expired-reservations';
 
-    protected $description = 'Release stock reservations that have passed their expiry (skeleton — not yet implemented).';
+    protected $description = 'Release stock reservations for B2C orders whose reserved_until has passed unpaid.';
 
-    public function handle(): int
+    public function handle(OrderService $orders): int
     {
-        $this->warn('stock:release-expired-reservations is a skeleton: no reservation-expiry concept exists in the schema yet.');
+        $released = $orders->releaseExpiredReservations();
+
+        $this->info("Released {$released} expired reservation(s).");
 
         return self::SUCCESS;
     }

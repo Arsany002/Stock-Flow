@@ -10,6 +10,12 @@ use App\Http\Controllers\Web\Catalog\PriceListItemController;
 use App\Http\Controllers\Web\Catalog\ProductController;
 use App\Http\Controllers\Web\Catalog\SupplierController;
 use App\Http\Controllers\Web\DashboardController;
+use App\Http\Controllers\Web\Procurement\PurchaseOrderController;
+use App\Http\Controllers\Web\Procurement\QuoteController;
+use App\Http\Controllers\Web\Sales\CartController;
+use App\Http\Controllers\Web\Sales\CheckoutController;
+use App\Http\Controllers\Web\Sales\OrderController;
+use App\Http\Controllers\Web\Sales\PaymentController;
 use App\Http\Controllers\Web\Stock\StockAdjustmentController;
 use App\Http\Controllers\Web\Stock\StockLevelController;
 use App\Http\Controllers\Web\Stock\StockMovementController;
@@ -129,4 +135,80 @@ Route::middleware('auth')->group(function () {
         Route::post('/reconcile', [StockReconciliationController::class, 'run'])
             ->name('reconcile.run')->middleware('permission:stock.move|audit.read');
     });
+
+    // B2C checkout module. Cart/checkout/"my orders" are customer actions,
+    // gated by `sale.create` (cart has no Policy — it isn't a persisted
+    // record). /orders/{order} and /payments/{payment} are reachable by
+    // either the owning customer OR staff holding `payment.settle` (they
+    // need to see an order to settle its COD/placeholder payment), so
+    // those two stay behind plain `auth` with OrderPolicy::view() /
+    // PaymentPolicy::view() (checked in the controllers) doing the real
+    // record-level gate. See docs/project/canonical-decisions.md §2 and
+    // app/Services/OrderService.php.
+    Route::middleware('permission:sale.create')->group(function () {
+        Route::get('/cart', [CartController::class, 'show'])->name('cart.show');
+        Route::post('/cart', [CartController::class, 'store'])->name('cart.store');
+        Route::put('/cart/{product}', [CartController::class, 'update'])->name('cart.update');
+        Route::delete('/cart/{product}', [CartController::class, 'destroy'])->name('cart.destroy');
+
+        Route::get('/checkout', [CheckoutController::class, 'create'])->name('checkout.create');
+        Route::post('/checkout', [CheckoutController::class, 'store'])->name('checkout.store');
+
+        Route::get('/orders', [OrderController::class, 'index'])->name('orders.index');
+    });
+
+    Route::get('/orders/{order}', [OrderController::class, 'show'])->name('orders.show');
+    Route::get('/payments/{payment}', [PaymentController::class, 'show'])->name('payments.show');
+
+    // Staff-only actions (payment.settle) — record-level enforcement is in
+    // OrderPolicy::fulfill() / PaymentPolicy::settle(), this is the coarse
+    // route gate.
+    Route::post('/orders/{order}/fulfill', [OrderController::class, 'fulfill'])
+        ->name('orders.fulfill')->middleware('permission:payment.settle');
+    Route::post('/payments/{payment}/settle', [PaymentController::class, 'settle'])
+        ->name('payments.settle')->middleware('permission:payment.settle');
+
+    // B2B procurement module. Visibility across the whole /procurement
+    // group is gated broadly to anyone who could plausibly need it
+    // (Business Buyer requesting/owning quotes+POs, Vendor/Inventory
+    // Manager pricing quotes, an approver, or someone settling payments);
+    // QuotePolicy/PurchaseOrderPolicy (checked in the controllers) do the
+    // real "own account" / "own pricing context" record-level scoping. See
+    // app/Services/QuoteService.php and PurchaseOrderService.php for the
+    // full draft -> sent -> accepted -> pending_approval -> approved ->
+    // fulfilled state machine.
+    Route::middleware('permission:quote.request|quote.price|po.approve|payment.settle')
+        ->prefix('procurement')->name('procurement.')->group(function () {
+            // Route order matters: /quotes/create before /quotes/{quote}.
+            Route::get('/quotes', [QuoteController::class, 'index'])->name('quotes.index');
+            Route::get('/quotes/create', [QuoteController::class, 'create'])
+                ->name('quotes.create')->middleware('permission:quote.request');
+            Route::post('/quotes', [QuoteController::class, 'store'])
+                ->name('quotes.store')->middleware('permission:quote.request');
+            Route::get('/quotes/{quote}/price', [QuoteController::class, 'priceCreate'])
+                ->name('quotes.price.create')->middleware('permission:quote.price');
+            Route::post('/quotes/{quote}/price', [QuoteController::class, 'priceStore'])
+                ->name('quotes.price.store')->middleware('permission:quote.price');
+            Route::post('/quotes/{quote}/accept', [QuoteController::class, 'accept'])
+                ->name('quotes.accept')->middleware('permission:quote.request');
+            Route::post('/quotes/{quote}/reject', [QuoteController::class, 'reject'])
+                ->name('quotes.reject')->middleware('permission:quote.request');
+            Route::get('/quotes/{quote}', [QuoteController::class, 'show'])->name('quotes.show');
+
+            Route::get('/purchase-orders', [PurchaseOrderController::class, 'index'])->name('purchase-orders.index');
+            Route::get('/purchase-orders/{purchaseOrder}/approve', [PurchaseOrderController::class, 'approveCreate'])
+                ->name('purchase-orders.approve.create')->middleware('permission:po.approve');
+            Route::post('/purchase-orders/{purchaseOrder}/approve', [PurchaseOrderController::class, 'approve'])
+                ->name('purchase-orders.approve.store')->middleware('permission:po.approve');
+            Route::post('/purchase-orders/{purchaseOrder}/reject', [PurchaseOrderController::class, 'reject'])
+                ->name('purchase-orders.reject')->middleware('permission:po.approve');
+            Route::get('/purchase-orders/{purchaseOrder}/bank-transfer', [PurchaseOrderController::class, 'bankTransferCreate'])
+                ->name('purchase-orders.bank-transfer.create')->middleware('permission:payment.settle');
+            Route::post('/purchase-orders/{purchaseOrder}/bank-transfer', [PurchaseOrderController::class, 'bankTransferStore'])
+                ->name('purchase-orders.bank-transfer.store')->middleware('permission:payment.settle');
+            Route::post('/purchase-orders/{purchaseOrder}/close', [PurchaseOrderController::class, 'close'])
+                ->name('purchase-orders.close')->middleware('permission:payment.settle');
+            Route::get('/purchase-orders/{purchaseOrder}', [PurchaseOrderController::class, 'show'])
+                ->name('purchase-orders.show');
+        });
 });

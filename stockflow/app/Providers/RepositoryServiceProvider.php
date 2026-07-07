@@ -2,7 +2,9 @@
 
 namespace App\Providers;
 
+use App\Repositories\BusinessAccountRepository;
 use App\Repositories\CategoryRepository;
+use App\Repositories\Contracts\BusinessAccountRepositoryInterface;
 use App\Repositories\Contracts\CategoryRepositoryInterface;
 use App\Repositories\Contracts\ImportRepositoryInterface;
 use App\Repositories\Contracts\OrderRepositoryInterface;
@@ -49,5 +51,6 @@ class RepositoryServiceProvider extends ServiceProvider
         PurchaseOrderRepositoryInterface::class => PurchaseOrderRepository::class,
         PaymentRepositoryInterface::class => PaymentRepository::class,
         ImportRepositoryInterface::class => ImportRepository::class,
+        BusinessAccountRepositoryInterface::class => BusinessAccountRepository::class,
     ];
 }
