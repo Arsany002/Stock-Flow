@@ -39,6 +39,14 @@ class User extends Authenticatable implements LaratrustUser
         return $this->hasOne(BusinessAccount::class);
     }
 
+    /**
+     * The supplier this Vendor-role user manages, if any.
+     */
+    public function supplier(): HasOne
+    {
+        return $this->hasOne(Supplier::class);
+    }
+
     public function orders(): HasMany
     {
         return $this->hasMany(Order::class);

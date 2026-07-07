@@ -4,6 +4,11 @@ use App\Http\Controllers\Web\Admin\PermissionMatrixController;
 use App\Http\Controllers\Web\Admin\RoleController;
 use App\Http\Controllers\Web\Admin\UserController;
 use App\Http\Controllers\Web\Auth\LoginController;
+use App\Http\Controllers\Web\Catalog\CategoryController;
+use App\Http\Controllers\Web\Catalog\PriceListController;
+use App\Http\Controllers\Web\Catalog\PriceListItemController;
+use App\Http\Controllers\Web\Catalog\ProductController;
+use App\Http\Controllers\Web\Catalog\SupplierController;
 use App\Http\Controllers\Web\DashboardController;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
@@ -48,5 +53,50 @@ Route::middleware('auth')->group(function () {
             Route::get('/roles', [RoleController::class, 'index'])->name('roles.index');
             Route::get('/permissions/matrix', [PermissionMatrixController::class, 'index'])->name('permissions.matrix');
         });
+    });
+
+    Route::prefix('catalog')->name('catalog.')->group(function () {
+        // Route order matters: /products/create must be registered before
+        // the /products/{product} wildcard, or "create" would be parsed as
+        // a product id.
+        Route::get('/products', [ProductController::class, 'index'])
+            ->name('products.index')->middleware('permission:catalog.read');
+        Route::get('/products/create', [ProductController::class, 'create'])
+            ->name('products.create')->middleware('permission:product.manage');
+        Route::get('/products/{product}/edit', [ProductController::class, 'edit'])
+            ->name('products.edit')->middleware('permission:product.manage');
+        Route::get('/products/{product}', [ProductController::class, 'show'])
+            ->name('products.show')->middleware('permission:catalog.read');
+        Route::post('/products', [ProductController::class, 'store'])
+            ->name('products.store')->middleware('permission:product.manage');
+        Route::put('/products/{product}', [ProductController::class, 'update'])
+            ->name('products.update')->middleware('permission:product.manage');
+        Route::delete('/products/{product}', [ProductController::class, 'destroy'])
+            ->name('products.destroy')->middleware('permission:product.manage');
+
+        Route::get('/categories', [CategoryController::class, 'index'])
+            ->name('categories.index')->middleware('permission:catalog.read');
+        Route::post('/categories', [CategoryController::class, 'store'])
+            ->name('categories.store')->middleware('permission:category.manage');
+        Route::delete('/categories/{category}', [CategoryController::class, 'destroy'])
+            ->name('categories.destroy')->middleware('permission:category.manage');
+
+        Route::get('/suppliers', [SupplierController::class, 'index'])
+            ->name('suppliers.index')->middleware('permission:catalog.read');
+        Route::post('/suppliers', [SupplierController::class, 'store'])
+            ->name('suppliers.store')->middleware('permission:product.manage');
+        Route::delete('/suppliers/{supplier}', [SupplierController::class, 'destroy'])
+            ->name('suppliers.destroy')->middleware('permission:product.manage');
+
+        Route::get('/price-lists', [PriceListController::class, 'index'])
+            ->name('price-lists.index')->middleware('permission:catalog.read');
+        Route::post('/price-lists', [PriceListController::class, 'store'])
+            ->name('price-lists.store')->middleware('permission:pricelist.manage');
+        Route::post('/price-lists/{priceList}/items', [PriceListItemController::class, 'store'])
+            ->name('price-lists.items.store')->middleware('permission:pricelist.manage');
+        Route::put('/price-list-items/{priceListItem}', [PriceListItemController::class, 'update'])
+            ->name('price-list-items.update')->middleware('permission:pricelist.manage');
+        Route::delete('/price-list-items/{priceListItem}', [PriceListItemController::class, 'destroy'])
+            ->name('price-list-items.destroy')->middleware('permission:pricelist.manage');
     });
 });

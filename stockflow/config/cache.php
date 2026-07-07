@@ -129,8 +129,14 @@ return [
     | storage. By default, no PHP classes will be unserialized from your
     | cache to prevent gadget chain attacks if your APP_KEY is leaked.
     |
+    | Set to true here: CatalogService (see docs/project/canonical-decisions.md
+    | §11, "catalog reads cached in Redis") deliberately caches Eloquent
+    | Collections/Paginators, not just primitives. Every cached value
+    | originates from a trusted server-side query, never from user input,
+    | so the gadget-chain risk this setting guards against doesn't apply
+    | to our cache writes.
     */
 
-    'serializable_classes' => false,
+    'serializable_classes' => true,
 
 ];

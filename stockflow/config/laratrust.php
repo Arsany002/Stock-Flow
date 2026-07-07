@@ -269,8 +269,15 @@ return [
     |
     | Determines if you can check if a user has a permission using the "can" method.
     |
+    | Deliberately false: Laratrust's Gate::before() hook (registered when
+    | this is true) treats the first non-boolean argument passed to ANY
+    | Gate/Policy check as a team identifier. That breaks Policy-based
+    | checks like $user->can('create', Product::class) — it tries to look
+    | up a team named "App\Models\Product" and throws ModelNotFoundException.
+    | Our Policies (ProductPolicy, PriceListPolicy) call $user->isAbleTo()
+    | directly instead, so this isn't needed. See docs/project/canonical-decisions.md §2.
     */
-    'permissions_as_gates' => true,
+    'permissions_as_gates' => false,
 
     /*
     |--------------------------------------------------------------------------
