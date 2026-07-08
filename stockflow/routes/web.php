@@ -45,7 +45,7 @@ Route::get('/', function () {
 
 Route::middleware('guest')->group(function () {
     Route::get('/login', [LoginController::class, 'create'])->name('login');
-    Route::post('/login', [LoginController::class, 'store']);
+    Route::post('/login', [LoginController::class, 'store'])->middleware('throttle:login');
 });
 
 Route::middleware('auth')->group(function () {
@@ -160,7 +160,8 @@ Route::middleware('auth')->group(function () {
         Route::delete('/cart/{product}', [CartController::class, 'destroy'])->name('cart.destroy');
 
         Route::get('/checkout', [CheckoutController::class, 'create'])->name('checkout.create');
-        Route::post('/checkout', [CheckoutController::class, 'store'])->name('checkout.store');
+        Route::post('/checkout', [CheckoutController::class, 'store'])
+            ->name('checkout.store')->middleware('throttle:checkout');
 
         Route::get('/orders', [OrderController::class, 'index'])->name('orders.index');
     });

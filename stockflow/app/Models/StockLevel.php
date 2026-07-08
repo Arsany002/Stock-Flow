@@ -12,6 +12,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * Denormalized projection of stock_movements, and the row locked
  * (SELECT ... FOR UPDATE) during reserve/confirm/transfer. `available` is
  * always computed, never stored — see docs/project/canonical-decisions.md §6.
+ *
+ * @property-read int $available
+ * @property-read Warehouse $warehouse
  */
 class StockLevel extends Model
 {

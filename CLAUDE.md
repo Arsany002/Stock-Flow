@@ -73,9 +73,10 @@ matrix; demo users seeded by `DemoUserSeeder` (SuperAdmin) and
 
 ## Current state (what's actually built)
 
-- **Local dev infra**: Docker Compose (`app`, `mysql`, `redis`, `queue`, `scheduler`,
-  `vite` services). `make start` / `make test` / `make migrate` etc. — see
-  `stockflow/Makefile` and `stockflow/README.md`.
+- **Local dev infra**: Docker Compose (`app`, `mysql`, `redis`, `queue` — runs
+  `artisan horizon`, `scheduler`, `vite` services). `make start` / `make test` /
+  `make migrate` / `make quality` etc. — see `stockflow/Makefile` and
+  `stockflow/README.md`.
 - **Auth**: session login/logout (`Web/Auth/LoginController`, `AuthService`).
 - **Authorization**: Laratrust roles/permissions (teams enabled), `ProductPolicy`,
   `PriceListPolicy` (also covers `PriceListItem`), Admin UI for user/role management
@@ -234,6 +235,50 @@ matrix; demo users seeded by `DemoUserSeeder` (SuperAdmin) and
   for an initial positive quantity, `adjust` for deltas), then reconciles the touched
   product/warehouse pair. Error report UI and CSV live at
   `/imports/{importBatch}/errors`.
+- **Hardening pass** (performance/reliability/CI, no new business entity): see
+  `stockflow/docs/technical/cache.md` and `stockflow/docs/technical/indexing.md` for
+  full detail. Summary:
+  - `StockService::listLevels()` (the Stock/Levels report page only) is now cached
+    (tag `stock-levels`, 30s TTL, flushed on every `recordMovement()` call — the
+    single choke point every mutation funnels through). Every other `StockService`
+    read (`findLevel()`, `lockLevelForUpdate()`, `lockOrCreateLevel()`,
+    `bestWarehouseFor()`, `reconcile()`'s ledger/projection totals) stays live and
+    uncached deliberately — caching a locked-mutation decision or a reconciliation
+    proof would defeat the point of the ledger.
+  - `DatabaseSeeder::run()` now calls `Cache::flush()` before seeding, and `make
+    fresh` runs `cache:clear` after `migrate:fresh`. Fixes a real bug: bigint
+    auto-increment IDs (see "known deviation" above) get reused across a
+    `migrate:fresh`, so a stale Laratrust permission-cache entry keyed by ID from a
+    *previous* seeding pass survived and got served to the newly-seeded SuperAdmin,
+    making them look unauthorized everywhere. Regression test:
+    `tests/Feature/Admin/SeededSuperAdminAccessTest.php`.
+  - Rate limiters (`AppServiceProvider::boot()`): `login` (5/min, keyed by
+    IP+email), `checkout` (10/min per user), `webhook` (60/min per IP, applied to
+    the whole `/webhooks/v1` group in `bootstrap/app.php`), `api` (120/min per
+    token/IP, pre-existing).
+  - Laravel Horizon supervises the redis queue (`docker-compose.yml`'s `queue`
+    service now runs `artisan horizon` instead of a plain `queue:work` process).
+    Dashboard at `/horizon`, gated to SuperAdmin only
+    (`HorizonServiceProvider::gate()` — Horizon exposes job payloads/failures with
+    no equivalent entry in the PRD's permission matrix, so it's a direct role
+    check, not a new granular permission). `config/horizon.php`'s
+    `defaults.tries`/`backoff` (3/3) preserve the retry behavior the old
+    `queue:work --tries=3 --backoff=3` flags gave `ImportCatalogJob`, which
+    declares no `$tries` of its own.
+  - `App\Http\Middleware\SecurityHeaders` (registered globally in
+    `bootstrap/app.php`) sets `X-Content-Type-Options`, `X-Frame-Options`,
+    `Referrer-Policy`, `Permissions-Policy` on every response, plus
+    `Strict-Transport-Security` on HTTPS requests. No CSP yet — the React bundle
+    has no nonce plumbing and a naive CSP would break inline styles some UI
+    libraries rely on; deliberately deferred, not an oversight.
+  - Code quality gate: `pint.json` (Laravel preset), `phpstan.neon` +
+    `phpstan-baseline.neon` (Larastan, level 5, 250 pre-existing findings
+    baselined — mostly Larastan false positives on enum `casts()` methods, not
+    real bugs; `treatPhpDocTypesAsCertain: false` documents why). `make quality`
+    runs pint + stan + the full test suite in one command. `.github/workflows/
+    ci.yml` runs the same three gates on every push/PR, with MySQL + Redis service
+    containers for the handful of tests that need real DB/cache semantics
+    (`tests/Concerns/UsesRealMysqlDatabase.php`).
 - **External B2B API module**: `composer require laravel/passport`; Passport config
   and migrations are published. `User` uses `HasApiTokens`, `auth.guards.api` uses
   the `passport` driver, and `AppServiceProvider` enables the password grant, refresh

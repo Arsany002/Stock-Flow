@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 COMPOSE := docker compose
 
-.PHONY: help start stop restart build logs shell migrate fresh test npm-dev npm-build
+.PHONY: help start stop restart build logs shell migrate fresh test pint stan quality npm-dev npm-build
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -28,11 +28,23 @@ shell: ## Open a shell inside the app container
 migrate: ## Run database migrations inside the app container
 	$(COMPOSE) exec app php artisan migrate
 
-fresh: ## Drop all tables and re-run migrations
+fresh: ## Drop all tables, re-run migrations, and clear the cache (migrate:fresh doesn't touch Redis — see docs/technical/cache.md)
 	$(COMPOSE) exec app php artisan migrate:fresh
+	$(COMPOSE) exec app php artisan cache:clear
 
 test: ## Run the PHPUnit/Pest test suite inside the app container
 	$(COMPOSE) exec app php artisan test
+
+pint: ## Check code style (Laravel Pint) without fixing
+	$(COMPOSE) exec app ./vendor/bin/pint --test
+
+pint-fix: ## Fix code style (Laravel Pint)
+	$(COMPOSE) exec app ./vendor/bin/pint
+
+stan: ## Run static analysis (PHPStan/Larastan)
+	$(COMPOSE) exec app ./vendor/bin/phpstan analyse --memory-limit=1G
+
+quality: pint stan test ## Run the full local quality gate: style, static analysis, tests
 
 npm-dev: ## Follow the Vite dev server logs (already running as the `vite` service)
 	$(COMPOSE) logs -f vite

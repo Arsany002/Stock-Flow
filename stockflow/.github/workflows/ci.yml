@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  quality:
+    name: Style, static analysis, and tests
+    runs-on: ubuntu-latest
+
+    # Only a handful of tests need real MySQL/Redis (schema/index invariants,
+    # the concurrency proof, and one Redis-serialization round-trip test —
+    # see tests/Concerns/UsesRealMysqlDatabase.php and CLAUDE.md's gotcha on
+    # why SQLite can't stand in for those). The rest of the suite runs
+    # against SQLite in-memory (phpunit.xml forces DB_CONNECTION=sqlite),
+    # but these services need to exist for the full suite to pass.
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: stockflow_root
+          MYSQL_DATABASE: stockflow
+          MYSQL_USER: stockflow
+          MYSQL_PASSWORD: stockflow
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pstockflow_root"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_DATABASE: stockflow
+      DB_USERNAME: stockflow
+      DB_PASSWORD: stockflow
+      DB_ROOT_PASSWORD: stockflow_root
+      DB_TEST_DATABASE: stockflow_testing
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, xml, ctype, fileinfo, tokenizer, pdo_mysql, pdo_sqlite, redis, bcmath, gd, zip, curl, intl
+          coverage: none
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Copy .env
+        run: cp .env.example .env
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Generate app key
+        run: php artisan key:generate
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build frontend assets
+        run: npm run build
+
+      - name: Pint (code style)
+        run: composer run pint-test
+
+      - name: Larastan (static analysis)
+        run: composer run stan
+
+      - name: PHPUnit
+        run: php artisan test

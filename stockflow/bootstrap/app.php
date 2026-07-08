@@ -6,6 +6,7 @@ use App\Exceptions\UnauthorizedWarehouseException;
 use App\Http\Middleware\AuthenticateApiClientCredentials;
 use App\Http\Middleware\EnsureApiRequestsJson;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\SecurityHeaders;
 use App\Http\Middleware\WarehouseScopeMiddleware;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
@@ -26,12 +27,16 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
         then: function (): void {
-            Route::middleware('api')
+            Route::middleware(['api', 'throttle:webhook'])
                 ->prefix('webhooks/v1')
                 ->group(base_path('routes/webhooks.php'));
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Global (web + api + webhooks): every response gets these,
+        // including 4xx/5xx error pages and API JSON responses.
+        $middleware->append(SecurityHeaders::class);
+
         $middleware->web(append: [
             HandleInertiaRequests::class,
         ]);

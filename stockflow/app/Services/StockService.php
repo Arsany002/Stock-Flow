@@ -14,7 +14,9 @@ use App\Repositories\Contracts\StockRepositoryInterface;
 use App\Repositories\Contracts\WarehouseRepositoryInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -54,6 +56,28 @@ use InvalidArgumentException;
  */
 class StockService
 {
+    /**
+     * Tag for the *display-only* `listLevels()` cache (the Stock/Levels
+     * report page). Deliberately narrow: nothing else in this class is
+     * ever cached — `findLevel()`/`lockLevelForUpdate()`/
+     * `lockOrCreateLevel()`/`bestWarehouseFor()`'s underlying query, and
+     * `reconcile()`'s `allLevels()`/`ledgerTotals()`, all stay live,
+     * uncached reads because they feed either a locked mutation decision
+     * or a correctness proof — caching either would risk exactly the kind
+     * of stale-oversell or false-reconciliation bug the whole ledger
+     * design exists to prevent. See docs/technical/cache.md
+     * §"Stock levels — cached carefully".
+     */
+    private const CACHE_TAG = 'stock-levels';
+
+    /**
+     * Short TTL — flush-on-write (every recordMovement() call) is the
+     * primary invalidation mechanism; this is just a backstop in case a
+     * future write path is ever added that forgets to go through
+     * recordMovement().
+     */
+    private const CACHE_TTL = 30;
+
     public function __construct(
         private readonly StockRepositoryInterface $stock,
         private readonly WarehouseRepositoryInterface $warehouses,
@@ -61,15 +85,22 @@ class StockService
     ) {}
 
     /**
-     * Read-only pass-throughs for the Stock/Levels and Stock/Movements
-     * index pages — controllers depend on this service, never on the
-     * repository directly, per docs/project/canonical-decisions.md §2.
+     * Read-only pass-through for the Stock/Levels index page — controllers
+     * depend on this service, never the repository directly, per
+     * docs/project/canonical-decisions.md §2. Cached (see CACHE_TAG above)
+     * and flushed on every stock movement via recordMovement().
      *
      * @param  array<string, mixed>  $filters
      */
     public function listLevels(int $perPage, array $filters = []): LengthAwarePaginator
     {
-        return $this->stock->paginateLevels($perPage, $filters);
+        $page = Paginator::resolveCurrentPage() ?: 1;
+
+        return Cache::tags([self::CACHE_TAG])->remember(
+            sprintf('stock:levels:%s', md5(json_encode([$page, $perPage, $filters]))),
+            self::CACHE_TTL,
+            fn () => $this->stock->paginateLevels($perPage, $filters)
+        );
     }
 
     /**
@@ -372,7 +403,7 @@ class StockService
         ?Model $reference = null,
         ?string $reason = null,
     ): StockMovement {
-        return $this->stock->createMovement([
+        $movement = $this->stock->createMovement([
             'product_id' => $product->id,
             'warehouse_id' => $warehouse->id,
             'type' => $type,
@@ -382,6 +413,15 @@ class StockService
             'reference_type' => $reference?->getMorphClass(),
             'reference_id' => $reference?->getKey(),
         ]);
+
+        // Every mutation appends exactly one (or, for transfer(), two)
+        // movement row through this single method, so flushing here — not
+        // scattered across each of purchaseIn/reserve/release/confirmSale/
+        // transfer/adjust — guarantees listLevels()'s cache can never
+        // outlive the write that invalidates it.
+        Cache::tags([self::CACHE_TAG])->flush();
+
+        return $movement;
     }
 
     private function assertPositive(int $quantity): void

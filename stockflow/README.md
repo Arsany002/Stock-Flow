@@ -46,6 +46,11 @@ ledger — `php artisan stock:reconcile` proves it.
   dashboard KPI bundle; five paginated, filtered, indexed reports (low stock, stock
   movements, sales, payments, import history). See "Admin, audit, dashboard &
   reports" below.
+- **Hardening**: Redis-cached stock levels report with flush-on-write
+  invalidation, rate limiting (login/checkout/webhook/API), Laravel Horizon
+  (queue dashboard, SuperAdmin-gated), baseline security headers on every
+  response, Laravel Pint + Larastan static analysis, and a GitHub Actions CI
+  gate. See "Hardening" below.
 - Not yet built: real Paymob/Fawry provider API calls/credentials.
 
 ## Requirements
@@ -63,7 +68,9 @@ docker compose exec app php artisan db:seed   # demo roles/users/warehouses/cata
 ```
 
 `make help` lists all available targets (`start`, `stop`, `restart`, `build`, `logs`,
-`shell`, `migrate`, `fresh`, `test`, `npm-dev`, `npm-build`).
+`shell`, `migrate`, `fresh`, `test`, `pint`, `pint-fix`, `stan`, `quality`,
+`npm-dev`, `npm-build`). `make quality` runs the full local gate (style + static
+analysis + tests) in one command — the same three steps CI runs.
 
 Visit `http://127.0.0.1:8000`. Guests are redirected to `/login`; authenticated users
 land on `/dashboard`. `DemoUserSeeder` creates a SuperAdmin login and
@@ -323,6 +330,88 @@ Manual test flow:
 4. If failures exist, open `/imports/{batch}/errors` or download the CSV report.
 5. For `opening_stock`, run `php artisan stock:reconcile`; it should report no
    ledger/projection drift.
+
+## Hardening
+
+Full detail (cache keys/TTLs/invalidation triggers, index inventory, real
+`EXPLAIN` plans) lives in [`docs/technical/cache.md`](docs/technical/cache.md)
+and [`docs/technical/indexing.md`](docs/technical/indexing.md). Summary:
+
+- **Caching**: `CatalogService` (tag `catalog`, flush-on-write) and
+  `StockService::listLevels()` — the Stock/Levels report page only — (tag
+  `stock-levels`, 30s TTL, flushed on every `recordMovement()` call). Every
+  other stock read stays live/uncached deliberately: caching a locked-mutation
+  decision or `reconcile()`'s ledger/projection proof would defeat the point of
+  the ledger. `DashboardService::kpisFor()` uses a short 60s TTL cache instead
+  of tag-and-flush, since dashboard reads don't vastly outnumber writes.
+- **Laratrust permission cache**: self-invalidates on every `addRole()` /
+  `removeRole()` / `syncRoles()` / `syncPermissions()` call — no manual
+  cache-busting needed in application code. One real gotcha this pass fixed:
+  `migrate:fresh` resets bigint auto-increment IDs but never touches Redis, so
+  a stale permission-cache entry from a *previous* user with the same ID could
+  survive a reset and get served to a freshly-seeded SuperAdmin.
+  `DatabaseSeeder::run()` now flushes the cache before seeding; `make fresh`
+  also runs `cache:clear` as a second layer of defense. Regression test:
+  `tests/Feature/Admin/SeededSuperAdminAccessTest.php`.
+- **Rate limiting** (`AppServiceProvider::boot()`): `login` (5/min, keyed by
+  IP+email — so one attacker IP can't lock out a legitimate email, and one
+  email being hammered from many IPs still throttles), `checkout` (10/min per
+  authenticated user), `webhook` (60/min per IP, applied to the whole
+  `/webhooks/v1` group), `api` (120/min per token/IP).
+- **Queue / Horizon**: `QUEUE_CONNECTION=redis`. The `queue` Docker Compose
+  service runs `php artisan horizon`, which supervises workers and exposes a
+  dashboard at `/horizon` (throughput, retries, failed jobs) gated to
+  SuperAdmin only (`HorizonServiceProvider::gate()`) — Horizon shows job
+  payloads/failure details with no equivalent entry in the PRD permission
+  matrix, so it's a direct role check rather than a new granular permission.
+  `config/horizon.php`'s `defaults.tries`/`backoff` (3/3) preserve the retry
+  behavior the previous plain `queue:work --tries=3 --backoff=3` process gave
+  `ImportCatalogJob` (which declares no `$tries` of its own).
+- **Scheduler**: `stock:release-expired-reservations` runs every minute
+  (`routes/console.php`), releasing B2C checkout reservations whose
+  `reserved_until` has passed. `scheduler` Docker Compose service loops
+  `artisan schedule:run` every 60s.
+- **Reconciliation**: `php artisan stock:reconcile` independently sums
+  `stock_movements` per (product, warehouse) and diffs it against
+  `stock_levels`; non-zero exit on drift, safe to run in CI/cron.
+- **Security headers**: `App\Http\Middleware\SecurityHeaders`, registered
+  globally, sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+  `Referrer-Policy: strict-origin-when-cross-origin`,
+  `Permissions-Policy: camera=(), microphone=(), geolocation=()` on every
+  response, plus `Strict-Transport-Security` on HTTPS requests. No CSP yet —
+  the React bundle has no nonce plumbing and a naive policy would break
+  inline styles some UI libraries rely on; deliberately deferred.
+- **Code quality gate**: `pint.json` (Laravel preset), `phpstan.neon` +
+  `phpstan-baseline.neon` (Larastan level 5 — 250 pre-existing findings
+  baselined, mostly a documented Larastan false-positive class around enum
+  `casts()` methods, not real bugs). `make quality` runs pint + stan + the
+  full test suite locally; `.github/workflows/ci.yml` runs the same three
+  gates on every push/PR against real MySQL + Redis service containers (only
+  a handful of tests need them — see `tests/Concerns/UsesRealMysqlDatabase.php`
+  — the rest of the suite runs on SQLite in-memory).
+
+### Final hardening checklist
+
+- [x] Redis caching — catalog (pre-existing) + stock levels report (new)
+- [x] Cache invalidation — flush-on-write for both, documented in `docs/technical/cache.md`
+- [x] Laratrust permission cache — self-invalidating; stale-cache-after-reset bug fixed + regression-tested
+- [x] MySQL indexes — inventoried with real `EXPLAIN` plans in `docs/technical/indexing.md`
+- [x] EXPLAIN validation notes — 8 real query plans captured against dev MySQL
+- [x] Rate limiting — login, checkout, payment webhook, `/api/v1` (pre-existing)
+- [x] Scheduler — `stock:release-expired-reservations` every minute (pre-existing, re-verified)
+- [x] Queue workers — `queue:work` replaced by Horizon-supervised workers
+- [x] Reconciliation — `stock:reconcile` (pre-existing, re-verified: 0 drift)
+- [x] CI quality gates — GitHub Actions: pint, stan, full test suite
+- [x] Test coverage — added: `SeededSuperAdminAccessTest`, `StockLevelCacheTest` (×2), `CatalogCacheTest` product-update case, `RateLimitingTest` (×4), `HorizonAccessTest` (×3), `SecurityHeadersTest`
+- [x] Security headers — `SecurityHeaders` middleware, global
+- [x] Laravel Pint — `pint.json`, clean across 299 files
+- [x] PHPStan/Larastan — level 5, baseline generated, 2 real issues fixed (`StockLevel` model docblocks)
+- [x] SuperAdmin unauthorized-access bug — fixed at the root cause (seeder cache flush), not just cleared once
+
+Verification commands run before considering this pass complete:
+`php artisan test` (159 passed), `./vendor/bin/pint --test` (299 files, clean),
+`./vendor/bin/phpstan analyse` (no errors against baseline), `npm run build`
+(clean production build).
 
 ## Project structure notes
 

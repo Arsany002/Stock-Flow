@@ -35,10 +35,14 @@ services:
     ports:
       - "${APP_PORT:-8000}:8000"
 
+  # Horizon supervises the redis queue workers (replacing a plain
+  # `queue:work` process) and gives an admin dashboard (/horizon, gated to
+  # SuperAdmin — see HorizonServiceProvider::gate()) for throughput, retry,
+  # and failed-job visibility. Config: config/horizon.php `environments`.
   queue:
     <<: *app-image
     container_name: stockflow-queue
-    command: ["php", "artisan", "queue:work", "redis", "--sleep=3", "--tries=3", "--backoff=3"]
+    command: ["php", "artisan", "horizon"]
 
   scheduler:
     <<: *app-image

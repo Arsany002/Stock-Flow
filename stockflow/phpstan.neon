@@ -1,0 +1,31 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+    - phpstan-baseline.neon
+
+parameters:
+    paths:
+        - app
+        - database
+        - routes
+
+    # Level 5: catches real bugs (wrong argument types, undefined methods/
+    # properties, always-true/false conditions) without the noise of
+    # strict-typing levels 7-9, which would require a much larger upfront
+    # annotation pass across a codebase this size to get to zero baseline
+    # findings. Raise incrementally as the codebase matures, not in one
+    # jump.
+    level: 5
+
+    # Models here declare enum casts via a `casts()` method (Laravel 11+
+    # style) rather than the old `$casts` property array. Larastan's model
+    # reflection resolves the cast type correctly, but PHPDoc-derived
+    # property types elsewhere in the call chain (e.g. a closure parameter
+    # typed from an untyped array) still get treated as the literal PHPDoc
+    # type. Without this, PHPStan reports ~250 false-positive "strict
+    # comparison always true/false" findings across every Service with a
+    # status-enum state machine. This is a standard, documented Larastan
+    # setting for exactly this situation — see
+    # https://phpstan.org/user-guide/discovering-symbols#php-doc-types.
+    treatPhpDocTypesAsCertain: false
+
+    tmpDir: storage/phpstan

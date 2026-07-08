@@ -61,6 +61,30 @@ class CatalogCacheTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page->has('products.data', 3));
     }
 
+    public function test_product_listing_cache_invalidates_after_updating_a_product(): void
+    {
+        $manager = $this->inventoryManager();
+        $product = Product::factory()->create(['name' => 'Original Name']);
+
+        // Warm the cache with the pre-update listing.
+        $this->actingAs($manager)
+            ->get('/catalog/products')
+            ->assertInertia(fn (Assert $page) => $page->where('products.data.0.name', 'Original Name'));
+
+        $this->actingAs($manager)->put("/catalog/products/{$product->id}", [
+            'category_id' => $product->category_id,
+            'sku' => $product->sku,
+            'name' => 'Updated Name',
+            'is_active' => true,
+        ])->assertRedirect();
+
+        // If the cache had not been flushed, this would still report the
+        // original name.
+        $this->actingAs($manager)
+            ->get('/catalog/products')
+            ->assertInertia(fn (Assert $page) => $page->where('products.data.0.name', 'Updated Name'));
+    }
+
     public function test_category_listing_cache_invalidates_after_creating_a_category(): void
     {
         $manager = $this->inventoryManager();
