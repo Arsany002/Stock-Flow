@@ -15,18 +15,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         unzip \
         libzip-dev \
+        libpng-dev \
+        libjpeg62-turbo-dev \
+        libfreetype6-dev \
         libonig-dev \
         default-mysql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Core extensions Laravel needs: pdo_mysql (MySQL 8), mbstring, bcmath, zip, pcntl
-# (queue worker signal handling).
-RUN docker-php-ext-install -j"$(nproc)" \
+# (queue worker signal handling), gd (PhpSpreadsheet/Laravel Excel).
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install -j"$(nproc)" \
         pdo_mysql \
         mbstring \
         bcmath \
         zip \
-        pcntl
+        pcntl \
+        gd
 
 COPY docker/php.ini /usr/local/etc/php/conf.d/99-stockflow.ini
 

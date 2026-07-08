@@ -69,7 +69,7 @@ export default function Create({ lines, subtotal, tax, total, paymentMethods }) 
                         </p>
                     )}
 
-                    {data.payment_method === 'fake' && (
+                    {data.payment_method === 'fake_gateway' && (
                         <Select
                             label="Simulate outcome (demo gateway only)"
                             name="outcome"

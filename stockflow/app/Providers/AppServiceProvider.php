@@ -17,8 +17,12 @@ use App\Policies\ProductPolicy;
 use App\Policies\PurchaseOrderPolicy;
 use App\Policies\QuotePolicy;
 use App\Policies\StockPolicy;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Passport\Passport;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -35,6 +39,24 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Passport::enablePasswordGrant();
+        Passport::$revokeRefreshTokenAfterUse = true;
+        Passport::tokensExpireIn(now()->addMinutes(15));
+        Passport::clientCredentialsTokensExpireIn(now()->addMinutes(15));
+        Passport::refreshTokensExpireIn(now()->addDays(30));
+        Passport::tokensCan([
+            'catalog:read' => 'Read product catalog data',
+            'orders:write' => 'Create B2B quote/order workflow records',
+            'stock:read' => 'Read stock availability',
+            'payments:write' => 'Create B2B bank transfer payment proofs',
+        ]);
+
+        RateLimiter::for('api', function (Request $request) {
+            $identifier = $request->user('api')?->getAuthIdentifier() ?: $request->ip();
+
+            return Limit::perMinute(120)->by((string) $identifier);
+        });
+
         Gate::policy(Product::class, ProductPolicy::class);
         Gate::policy(PriceList::class, PriceListPolicy::class);
         // PriceListPolicy also covers PriceListItem (own-item checks) —

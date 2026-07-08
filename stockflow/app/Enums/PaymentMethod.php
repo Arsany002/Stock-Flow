@@ -11,7 +11,7 @@ enum PaymentMethod: string
     case Fawry = 'fawry';
     case Cod = 'cod';
     case BankTransfer = 'bank_transfer';
-    case Fake = 'fake';
+    case FakeGateway = 'fake_gateway';
 
     public function label(): string
     {
@@ -20,22 +20,22 @@ enum PaymentMethod: string
             self::Fawry => 'Fawry',
             self::Cod => 'Cash on delivery',
             self::BankTransfer => 'Bank transfer',
-            self::Fake => 'Fake gateway (demo)',
+            self::FakeGateway => 'Fake gateway (demo)',
         };
     }
 
     /**
      * Paymob and Fawry have no real integration yet (see app/Payments) — a
      * checkout using either leaves the payment `pending` for manual
-     * settlement instead of processing anything. Cod and Fake are both
-     * fully wired: Cod stays `pending` until a staff delivery/settlement
-     * action; Fake resolves synchronously at checkout time (demo/test only).
+     * settlement instead of processing anything. Cod and FakeGateway are both
+     * wired: Cod stays `pending` until a staff delivery/settlement action;
+     * FakeGateway uses a simulated verified callback (demo/test only).
      */
     public function isPlaceholder(): bool
     {
         return match ($this) {
             self::Paymob, self::Fawry => true,
-            self::Cod, self::BankTransfer, self::Fake => false,
+            self::Cod, self::BankTransfer, self::FakeGateway => false,
         };
     }
 }

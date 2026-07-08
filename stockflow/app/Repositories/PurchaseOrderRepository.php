@@ -2,6 +2,7 @@
 
 namespace App\Repositories;
 
+use App\Enums\PurchaseOrderStatus;
 use App\Models\PurchaseOrder;
 use App\Repositories\Contracts\PurchaseOrderRepositoryInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -36,5 +37,13 @@ class PurchaseOrderRepository implements PurchaseOrderRepositoryInterface
         $purchaseOrder->update($attributes);
 
         return $purchaseOrder;
+    }
+
+    public function countByStatus(PurchaseOrderStatus $status, ?string $businessAccountId = null): int
+    {
+        return PurchaseOrder::query()
+            ->where('status', $status)
+            ->when($businessAccountId, fn ($query, $id) => $query->where('business_account_id', $id))
+            ->count();
     }
 }

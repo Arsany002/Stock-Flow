@@ -59,11 +59,21 @@ interface StockRepositoryInterface
     public function paginateLevels(int $perPage, array $filters = []): LengthAwarePaginator;
 
     /**
-     * Paginated, filterable listing for the Stock/Movements/Index page.
+     * Paginated, filterable listing for the Stock/Movements/Index page and
+     * the Stock Movement report.
      *
-     * @param  array<string, mixed>  $filters  e.g. ['product_id' => ..., 'warehouse_id' => ..., 'type' => ...]
+     * @param  array<string, mixed>  $filters  product_id, warehouse_id, type, actor_id, date_from, date_to
      */
     public function paginateMovements(int $perPage, array $filters = []): LengthAwarePaginator;
+
+    /**
+     * Paginated, filterable listing for the Low Stock report — every
+     * (product, warehouse) pair whose available (on_hand - reserved) is at
+     * or below $threshold.
+     *
+     * @param  array<string, mixed>  $filters  product_id, warehouse_id
+     */
+    public function paginateLowStockLevels(int $threshold, int $perPage, array $filters = []): LengthAwarePaginator;
 
     /**
      * All stock_levels rows (the projection side of reconciliation),
@@ -95,4 +105,9 @@ interface StockRepositoryInterface
      * @return Collection<int, StockLevel>
      */
     public function levelsForProductOrderedByAvailability(string $productId): Collection;
+
+    /**
+     * Cheap COUNT for the dashboard's "low stock" KPI.
+     */
+    public function countLowStockLevels(int $threshold): int;
 }

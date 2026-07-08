@@ -6,7 +6,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Widens payments.method to include 'fake' (the demo/test gateway used by
+ * Widens payments.method to include 'fake_gateway' (the demo/test gateway used by
  * B2C checkout — see app/Payments/FakeGateway.php). Uses the fluent
  * Blueprint::change() API rather than raw SQL so it runs on both MySQL (dev/
  * prod) and SQLite (the test suite's default connection, which recreates
@@ -25,7 +25,7 @@ return new class extends Migration
     {
         Schema::table('payments', function (Blueprint $table) {
             $values = collect(PaymentMethod::cases())
-                ->reject(fn (PaymentMethod $m) => $m === PaymentMethod::Fake)
+                ->reject(fn (PaymentMethod $m) => $m === PaymentMethod::FakeGateway)
                 ->map(fn (PaymentMethod $m) => $m->value)
                 ->all();
 

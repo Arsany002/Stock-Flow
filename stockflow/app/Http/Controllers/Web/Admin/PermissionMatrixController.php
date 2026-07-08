@@ -12,8 +12,9 @@ class PermissionMatrixController extends Controller
 {
     /**
      * Read-only role x permission grid, mirroring the Enterprise PRD §3
-     * permission matrix. This is a reporting view; role/permission
-     * assignment happens on the Users/EditRoles page.
+     * permission matrix. This is a reporting view; role assignment happens
+     * on the Users/Edit page, and a role's own permission set is edited on
+     * Roles/Index (RolePermissionController).
      */
     public function index(): Response
     {

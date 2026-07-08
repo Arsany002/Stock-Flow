@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Web\Admin\AuditLogController;
 use App\Http\Controllers\Web\Admin\PermissionMatrixController;
 use App\Http\Controllers\Web\Admin\RoleController;
 use App\Http\Controllers\Web\Admin\UserController;
@@ -10,8 +11,10 @@ use App\Http\Controllers\Web\Catalog\PriceListItemController;
 use App\Http\Controllers\Web\Catalog\ProductController;
 use App\Http\Controllers\Web\Catalog\SupplierController;
 use App\Http\Controllers\Web\DashboardController;
+use App\Http\Controllers\Web\Import\ImportController;
 use App\Http\Controllers\Web\Procurement\PurchaseOrderController;
 use App\Http\Controllers\Web\Procurement\QuoteController;
+use App\Http\Controllers\Web\Reports\ReportController;
 use App\Http\Controllers\Web\Sales\CartController;
 use App\Http\Controllers\Web\Sales\CheckoutController;
 use App\Http\Controllers\Web\Sales\OrderController;
@@ -62,8 +65,13 @@ Route::middleware('auth')->group(function () {
 
         Route::middleware('permission:role.manage')->group(function () {
             Route::get('/roles', [RoleController::class, 'index'])->name('roles.index');
+            Route::put('/roles/{role}/permissions', [RoleController::class, 'updatePermissions'])
+                ->name('roles.update-permissions');
             Route::get('/permissions/matrix', [PermissionMatrixController::class, 'index'])->name('permissions.matrix');
         });
+
+        Route::get('/audit-log', [AuditLogController::class, 'index'])
+            ->name('audit-log.index')->middleware('permission:audit.read');
     });
 
     Route::prefix('catalog')->name('catalog.')->group(function () {
@@ -158,7 +166,22 @@ Route::middleware('auth')->group(function () {
     });
 
     Route::get('/orders/{order}', [OrderController::class, 'show'])->name('orders.show');
+    Route::get('/payments', [PaymentController::class, 'index'])
+        ->name('payments.index')->middleware('permission:payment.settle');
     Route::get('/payments/{payment}', [PaymentController::class, 'show'])->name('payments.show');
+    Route::get('/payments/{payment}/fake-gateway', [PaymentController::class, 'fakeGateway'])
+        ->name('payments.fake-gateway');
+    Route::post('/payments/{payment}/fake-gateway', [PaymentController::class, 'simulateFakeGateway'])
+        ->name('payments.fake-gateway.store');
+
+    Route::middleware('permission:import.run')->prefix('imports')->name('imports.')->group(function () {
+        Route::get('/', [ImportController::class, 'index'])->name('index');
+        Route::get('/create', [ImportController::class, 'create'])->name('create');
+        Route::post('/', [ImportController::class, 'store'])->name('store');
+        Route::get('/{importBatch}/errors', [ImportController::class, 'errorReport'])->name('errors');
+        Route::get('/{importBatch}/errors/download', [ImportController::class, 'downloadErrorReport'])->name('errors.download');
+        Route::get('/{importBatch}', [ImportController::class, 'show'])->name('show');
+    });
 
     // Staff-only actions (payment.settle) — record-level enforcement is in
     // OrderPolicy::fulfill() / PaymentPolicy::settle(), this is the coarse
@@ -211,4 +234,21 @@ Route::middleware('auth')->group(function () {
             Route::get('/purchase-orders/{purchaseOrder}', [PurchaseOrderController::class, 'show'])
                 ->name('purchase-orders.show');
         });
+
+    // Reports (modules 5–9). Each gated by whichever existing permission
+    // maps to that report's domain — no new permissions invented. See
+    // requirement #7: audit.read/user.manage/role.manage/stock.read/
+    // payment.settle "where relevant".
+    Route::prefix('reports')->name('reports.')->group(function () {
+        Route::get('/low-stock', [ReportController::class, 'lowStock'])
+            ->name('low-stock')->middleware('permission:stock.read');
+        Route::get('/stock-movements', [ReportController::class, 'stockMovements'])
+            ->name('stock-movements')->middleware('permission:stock.read');
+        Route::get('/sales', [ReportController::class, 'sales'])
+            ->name('sales')->middleware('permission:payment.settle');
+        Route::get('/payments', [ReportController::class, 'payments'])
+            ->name('payments')->middleware('permission:payment.settle');
+        Route::get('/imports', [ReportController::class, 'imports'])
+            ->name('imports')->middleware('permission:import.run|audit.read');
+    });
 });

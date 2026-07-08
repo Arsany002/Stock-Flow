@@ -8,6 +8,7 @@ use App\Models\Role;
 use App\Models\User;
 use App\Services\RoleAssignmentService;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -42,7 +43,7 @@ class UserController extends Controller
     {
         $roles = Role::query()->orderBy('name')->get(['id', 'name', 'display_name']);
 
-        return Inertia::render('Admin/Users/EditRoles', [
+        return Inertia::render('Admin/Users/Edit', [
             'user' => [
                 'id' => $user->id,
                 'name' => $user->name,
@@ -61,7 +62,7 @@ class UserController extends Controller
      */
     public function updateRoles(UpdateUserRolesRequest $request, User $user): RedirectResponse
     {
-        $this->roleAssignmentService->syncRoles($user, $request->roleNames());
+        $this->roleAssignmentService->syncRoles($user, $request->roleNames(), Auth::user());
 
         return redirect()
             ->route('admin.users.edit-roles', $user)

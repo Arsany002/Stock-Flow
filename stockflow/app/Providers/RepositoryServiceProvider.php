@@ -2,8 +2,10 @@
 
 namespace App\Providers;
 
+use App\Repositories\AuditLogRepository;
 use App\Repositories\BusinessAccountRepository;
 use App\Repositories\CategoryRepository;
+use App\Repositories\Contracts\AuditLogRepositoryInterface;
 use App\Repositories\Contracts\BusinessAccountRepositoryInterface;
 use App\Repositories\Contracts\CategoryRepositoryInterface;
 use App\Repositories\Contracts\ImportRepositoryInterface;
@@ -52,5 +54,6 @@ class RepositoryServiceProvider extends ServiceProvider
         PaymentRepositoryInterface::class => PaymentRepository::class,
         ImportRepositoryInterface::class => ImportRepository::class,
         BusinessAccountRepositoryInterface::class => BusinessAccountRepository::class,
+        AuditLogRepositoryInterface::class => AuditLogRepository::class,
     ];
 }

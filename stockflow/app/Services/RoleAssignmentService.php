@@ -10,6 +10,8 @@ use App\Models\User;
  */
 class RoleAssignmentService
 {
+    public function __construct(private readonly AuditService $audit) {}
+
     /**
      * Replace a user's role assignments with exactly the given set.
      *
@@ -18,9 +20,18 @@ class RoleAssignmentService
      *
      * @param  list<string>  $roleNames
      */
-    public function syncRoles(User $user, array $roleNames): User
+    public function syncRoles(User $user, array $roleNames, ?User $actor = null): User
     {
+        $before = $user->roles()->pluck('name')->all();
+
         $user->syncRoles($roleNames);
+
+        // Requirement #2 of the admin/audit module: user/role changes are
+        // an audited event category.
+        $this->audit->record('user.roles_updated', $user, $actor, [
+            'before' => $before,
+            'after' => $roleNames,
+        ]);
 
         return $user->fresh();
     }

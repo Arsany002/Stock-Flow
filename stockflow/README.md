@@ -30,8 +30,23 @@ ledger — `php artisan stock:reconcile` proves it.
   Transfer settlement. `QuoteService` + `PurchaseOrderService` own two linked
   state machines; see "B2B procurement" below. Web UI at `/procurement/quotes/*`
   and `/procurement/purchase-orders/*`.
-- Not yet built: Excel import, Laravel Passport (`/api/v1`), real Paymob/Fawry
-  gateway integration, payment webhooks (`/webhooks/v1`).
+- **Payment architecture**: gateway drivers behind `PaymentGateway`, signed/idempotent
+  webhook routes under `/webhooks/v1`, unique `payments.gateway_ref`, and atomic
+  reservation → `sale_out` conversion inside `PaymentService`.
+- **Excel import**: `/imports` UI for categories, products, warehouses, suppliers,
+  price lists, and opening stock. Uploads create `import_batches`, queued jobs create
+  per-row `import_rows`, valid rows upsert by natural key, failed rows are reported,
+  and opening stock writes through `StockService`.
+- **External B2B API**: Passport-secured `/api/v1` JSON endpoints for catalog,
+  stock availability, B2B quotes/POs, and bank-transfer payment proof submission.
+  The API uses the same services as the Inertia controllers and returns `{data, meta}`.
+- **Admin, audit, dashboard & reports**: `AuditService` records user/role changes,
+  permission changes, stock adjustments, PO approvals, and payment settlement to
+  `activity_log`; role/permission editing is inline on `/admin/roles`; a cached
+  dashboard KPI bundle; five paginated, filtered, indexed reports (low stock, stock
+  movements, sales, payments, import history). See "Admin, audit, dashboard &
+  reports" below.
+- Not yet built: real Paymob/Fawry provider API calls/credentials.
 
 ## Requirements
 
@@ -88,6 +103,31 @@ touch the dev database. Notably:
   unit of stock via real `SELECT ... FOR UPDATE` row locking; exactly one succeeds.
 - `tests/Feature/Catalog/CatalogCacheTest.php` — one test round-trips through real
   Redis instead of the array cache driver.
+
+## External API
+
+Passport is installed only for external `/api/v1` clients. Browser UI continues to
+use session auth through the `web` guard.
+
+```bash
+composer require laravel/passport
+php artisan vendor:publish --tag=passport-config
+php artisan vendor:publish --tag=passport-migrations
+php artisan migrate
+php artisan passport:keys
+php artisan passport:client --password --provider=users --name="StockFlow B2B Password Grant"
+php artisan passport:client --client --name="StockFlow Integration"
+```
+
+Access tokens last 15 minutes; refresh tokens last 30 days and rotate on use. API
+docs live at [`docs/api-v1.md`](../docs/api-v1.md). Routes are under `/api/v1` and
+require `auth:api`, Passport scopes, Laratrust permissions/policies, JSON headers,
+and rate limiting.
+
+Password-grant tokens are for B2B users and are required for quote, PO, and payment
+workflows because those routes need `User` policies and business-account ownership.
+Client-credentials tokens are accepted as scoped service principals for read-only
+catalog and stock availability endpoints.
 
 ## Building for production
 
@@ -147,11 +187,15 @@ VAT is a fixed 14%, computed with `bcmath` to avoid float rounding drift on mone
 `php artisan stock:release-expired-reservations`, scheduled every minute.
 
 Payment methods (`app/Payments/*Gateway.php`, resolved by
-`PaymentService::resolveGateway()`): `cod` and `fake` are fully wired (`fake`
-resolves synchronously at checkout — demo/test only); `paymob`/`fawry` are
-placeholders that leave the payment `pending` for manual settlement. Cart is
-session-backed (`CartService`) — not a DB table, since only *order creation* is
-required to be database-backed.
+`PaymentService::resolveGateway()`): `fake_gateway` is demo/test-only and uses the
+same verified webhook path as real providers; `cod` stays pending until authorized
+staff confirms cash collection; `paymob`/`fawry` are signed-webhook placeholders
+with explicit TODOs for real provider contracts/credentials; `bank_transfer` is
+staff-settled for B2B. `PaymentService` locks the payment row and marks it
+`paid`/`failed` inside the same DB transaction that confirms the order or releases
+the reservation, so duplicate callbacks are no-ops and cannot reduce stock twice.
+Cart is session-backed (`CartService`) — not a DB table, since only *order
+creation* is required to be database-backed.
 
 ## B2B procurement
 
@@ -185,11 +229,11 @@ per line; reservation happens only when an approver calls `approve()`.
    terms).
 
 Bank Transfer settlement (`POST /procurement/purchase-orders/{po}/bank-transfer`)
-initiates and immediately settles a `Payment` (reusing the B2C module's
-`PaymentService`/`ManualSettlementGateway`), then `PurchaseOrderService::settle()`
-converts every line's reservation into a completed sale
-(`StockService::confirmSale()`) and pays down `outstanding_balance` — mirrors B2C's
-`confirmPayment()`, but also touches the credit ledger.
+initiates and settles a `bank_transfer` `Payment` through `PaymentService`.
+`PaymentService::settleManually()` then runs the payment update and
+`PurchaseOrderService::settle()` inside one transaction, converting every line's
+reservation into a completed sale (`StockService::confirmSale()`) and paying down
+`outstanding_balance`.
 
 `QuotePolicy`/`PurchaseOrderPolicy` enforce "own account" (Business Buyer) / "own
 pricing context" (Vendor) record-level scoping; staff holding `po.approve` or
@@ -197,20 +241,109 @@ pricing context" (Vendor) record-level scoping; staff holding `po.approve` or
 (`Order` for B2C, `PurchaseOrder` for B2B) since both share the polymorphic
 `payments` table.
 
+## Admin, audit, dashboard & reports
+
+`AuditService::record()` is the only writer of `activity_log` (the same pattern as
+`StockService` being the only writer of `stock_movements`) — called from inside
+`StockService::adjust()`, `PurchaseOrderService::approve()`/`reject()`,
+`PaymentService`'s settlement path (covers manual settlement, webhook confirmation,
+and the Fake Gateway simulator uniformly, since all three funnel through the same
+method), `RoleAssignmentService::syncRoles()`, and `RolePermissionService::
+syncPermissions()` — never from a Controller directly, so an entry can't exist
+without the action it describes having actually committed (both happen inside the
+same `DB::transaction()`). Fixed event vocabulary: `stock.adjusted`, `po.approved`,
+`po.rejected`, `payment.settled`, `user.roles_updated`, `role.permissions_updated`.
+View/filter at `/admin/audit-log` (`audit.read`; filters: event, user, date range).
+
+`RolePermissionService` lets a `role.manage` holder edit a role's own permission
+set inline from `/admin/roles` (Laratrust's `Role::syncPermissions()` already
+invalidates the permission cache for every user holding that role — no extra
+cache-busting step needed). `/admin/users/{user}/roles` (page component
+`Admin/Users/Edit`) still handles which roles a user has.
+
+`DashboardService::kpisFor()` returns a small COUNT/SUM bundle — `low_stock_count`,
+`pending_po_approvals`, `pending_payments`, `todays_sales_total`,
+`recent_activity` for staff; `pending_po_approvals`, `credit_limit`,
+`outstanding_balance` for a Business Buyer; `{scope: 'none'}` for anyone else
+(a bare Retail Customer isn't shown store-wide numbers) — cached for 60 seconds per
+viewer scope (staff share one cache entry; a Business Buyer gets one scoped to
+their `business_account_id`). A short TTL, not CatalogService's tag-and-flush
+pattern: dashboard reads don't vastly outnumber writes the way catalog reads do.
+
+Five reports, each a paginated + filtered + indexed `ReportService` call:
+
+| Report | Route | Permission | Filters |
+| --- | --- | --- | --- |
+| Low stock | `/reports/low-stock` | `stock.read` | product, warehouse, threshold |
+| Stock movements | `/reports/stock-movements` | `stock.read` | product, warehouse, type, user, date range |
+| Sales | `/reports/sales` | `payment.settle` | product, warehouse, status, user, date range |
+| Payments | `/reports/payments` | `payment.settle` | status, method, user, date range |
+| Import history | `/reports/imports` | `import.run\|audit.read` | status, entity, user, date range |
+
+Not every report exposes all five filter dimensions (date range/product/warehouse/
+status/user) — only the ones that actually exist on the underlying table. Payments
+have no product/warehouse column, so "user" maps to the payment's payable owner
+instead (`Order.user_id` or `PurchaseOrder.businessAccount.user_id`) and
+product/warehouse are omitted. Import batches span many rows/entities rather than
+one product, so `entity` stands in for "product". New indexes added for these
+reports: `payments(status, created_at)` + `payments(method)`,
+`import_batches(status, created_at)`, `activity_log(causer_id, created_at)` +
+`activity_log(event)`; the Stock Movement report reuses the existing
+`stock_movements(product_id, warehouse_id, created_at)` index, and Sales reuses
+`orders(status, created_at)`.
+
+## Excel imports
+
+Installed package:
+
+```bash
+composer require maatwebsite/excel
+```
+
+The UI lives at `/imports` and requires `import.run` (seeded for SuperAdmin and
+Inventory Manager). `make start` already runs the queue worker; without Docker,
+`composer run dev` starts the queue listener alongside Laravel and Vite.
+
+Supported entities and natural keys:
+
+- `categories`: `slug` (or generated from `name`), optional `parent_slug`.
+- `products`: `sku`, with `category_slug` or `category_name`.
+- `warehouses`: `code`.
+- `suppliers`: `email` when present, otherwise `name`.
+- `price_lists`: `name` + `type` for the list, `sku` + `min_qty` for items.
+- `opening_stock`: `sku` + `warehouse_code`; `quantity` is the target on-hand value.
+
+Manual test flow:
+
+1. Log in as a SuperAdmin or Inventory Manager.
+2. Open `/imports/create`, select an entity, and upload `.xlsx`, `.xls`, `.csv`, or
+   `.txt`.
+3. Open the resulting batch page at `/imports/{batch}` and refresh until status is
+   `Completed`.
+4. If failures exist, open `/imports/{batch}/errors` or download the CSV report.
+5. For `opening_stock`, run `php artisan stock:reconcile`; it should report no
+   ledger/projection drift.
+
 ## Project structure notes
 
 - `routes/web.php` — Inertia page routes only (session/`web` guard). No API routes.
+- `routes/api.php` — external Passport B2B API only, mounted as `/api/v1`.
+- `routes/webhooks.php` — `/webhooks/v1/paymob`, `/webhooks/v1/fawry`, and
+  `/webhooks/v1/fake-gateway`; mounted without the web/session/CSRF stack and
+  signature-verified where the provider supports it.
 - `app/Http/Controllers/Web/` — Inertia controllers, one folder per module
-  (`Auth/`, `Admin/`, `Catalog/`, `Stock/`, `Sales/`, `Procurement/`). Future API
-  controllers will live under `app/Http/Controllers/Api/V1/` and payment webhooks
-  under a `Webhooks/` group — neither exists yet.
+  (`Auth/`, `Admin/`, `Catalog/`, `Stock/`, `Sales/`, `Procurement/`, `Import/`,
+  `Reports/`).
+- `app/Http/Controllers/Api/V1/` — JSON API controllers for external B2B/system
+  clients; thin wrappers around the same Services used by Web controllers.
+- `app/Http/Controllers/Webhooks/` — Paymob/Fawry/Fake Gateway webhook endpoints.
 - Layering: **Controller → FormRequest → Service → Repository → Model.** Controllers
   never call Eloquent directly; FormRequests own `authorize()`/`rules()`; Services
   own business rules/transactions; Repositories own Eloquent queries; Policies own
   record-level authorization.
 - `resources/js/Pages/` — Inertia pages, resolved by `resources/js/app.jsx`, one
   folder per module (`Auth/`, `Admin/`, `Catalog/`, `Stock/`, `Sales/`,
-  `Procurement/`).
+  `Procurement/`, `Import/`, `Reports/`).
 - `resources/js/Layouts/` — `AppLayout` (authenticated shell, renders
   `FlashMessage`) and `GuestLayout` (centered card, used by the login page).
 - `resources/js/Components/` — shared UI primitives: `Button`, `Input`, `Select`,
@@ -231,7 +364,6 @@ Seeded by `RolePermissionSeeder` per the Enterprise PRD §3 permission matrix:
 
 ## Not yet built
 
-- Laravel Passport (external B2B API under `/api/v1`).
-- Payment webhooks (`/webhooks/v1`) and real Paymob/Fawry gateway integration
-  (`PaymentService::verifyWebhook()` still throws — see `app/Payments/`).
-- Excel import (`ImportService` is still a skeleton).
+- Real Paymob/Fawry API calls, credentials, and provider-specific signature
+  canonicalization. Placeholder drivers reject unsigned callbacks and document the
+  TODOs.

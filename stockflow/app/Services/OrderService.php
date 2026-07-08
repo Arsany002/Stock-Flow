@@ -81,8 +81,9 @@ class OrderService
      *
      * Payment is initiated *after* the reservation transaction commits —
      * a gateway call is an external side effect and doesn't belong inside
-     * the DB transaction boundary, even though today's drivers (Fake/Cod)
-     * are synchronous local code.
+     * the reservation DB transaction. FakeGateway then immediately dispatches
+     * its simulated verified callback so manual tests can exercise success
+     * and failure without a real provider.
      *
      * @param  list<array{product_id: string, quantity: int}>  $lines
      * @param  array<string, mixed>  $paymentOptions
@@ -157,7 +158,13 @@ class OrderService
             ]);
         });
 
-        $payment = $this->payments->initiate($order, $method, (float) $order->total, $paymentOptions);
+        $payment = $this->payments->initiate($order, $method, (string) $order->total, $paymentOptions);
+
+        if ($method === PaymentMethod::FakeGateway) {
+            $payment = $this->payments->simulateFakeGateway($payment, $paymentOptions['outcome'] ?? 'succeed');
+
+            return $order->fresh(['items', 'payments']);
+        }
 
         return match ($payment->status) {
             PaymentStatus::Paid => $this->confirmPayment($order->fresh(['items', 'payments']), $user),

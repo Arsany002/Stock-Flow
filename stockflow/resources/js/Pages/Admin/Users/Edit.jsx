@@ -2,7 +2,7 @@ import { Head, Link, useForm } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import Button from '@/Components/Button';
 
-export default function EditRoles({ user, roles, assignedRoles }) {
+export default function Edit({ user, roles, assignedRoles }) {
     const { data, setData, put, processing, errors } = useForm({
         roles: assignedRoles,
     });

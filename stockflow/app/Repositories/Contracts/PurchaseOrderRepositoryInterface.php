@@ -2,6 +2,7 @@
 
 namespace App\Repositories\Contracts;
 
+use App\Enums\PurchaseOrderStatus;
 use App\Models\PurchaseOrder;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
@@ -26,4 +27,10 @@ interface PurchaseOrderRepositoryInterface
      * @param  array<string, mixed>  $attributes
      */
     public function update(PurchaseOrder $purchaseOrder, array $attributes): PurchaseOrder;
+
+    /**
+     * Cheap COUNT for dashboard KPIs — e.g. "pending approvals" for staff,
+     * optionally scoped to one business account.
+     */
+    public function countByStatus(PurchaseOrderStatus $status, ?string $businessAccountId = null): int;
 }

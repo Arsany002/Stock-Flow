@@ -13,13 +13,15 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laratrust\Contracts\LaratrustUser;
 use Laratrust\Traits\HasRolesAndPermissions;
+use Laravel\Passport\Contracts\OAuthenticatable;
+use Laravel\Passport\HasApiTokens;
 
 #[Fillable(['name', 'email', 'password'])]
 #[Hidden(['password', 'remember_token'])]
-class User extends Authenticatable implements LaratrustUser
+class User extends Authenticatable implements LaratrustUser, OAuthenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, HasRolesAndPermissions, Notifiable;
+    use HasApiTokens, HasFactory, HasRolesAndPermissions, Notifiable;
 
     /**
      * Get the attributes that should be cast.

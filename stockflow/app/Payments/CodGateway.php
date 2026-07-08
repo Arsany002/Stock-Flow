@@ -2,23 +2,24 @@
 
 namespace App\Payments;
 
-use App\Enums\PaymentStatus;
 use App\Models\Payment;
 
 /**
- * Cash on delivery — no payment actually happens at checkout time. Stays
- * `pending` until a staff member settles it (PaymentService::settleManually(),
- * `payment.settle` permission) once the cash is collected on delivery. See
- * requirement #5/#8 of the B2C checkout module: reservation stays intact
- * until that delivery/settlement confirmation.
+ * Cash on delivery has no online callback. The reservation remains held until
+ * a staff member confirms cash collection through the authenticated settlement
+ * flow.
  */
-class CodGateway implements PaymentGatewayInterface
+class CodGateway implements PaymentGateway
 {
     public function initiate(Payment $payment, array $options = []): array
     {
         return [
-            'status' => PaymentStatus::Pending,
-            'meta' => ['note' => 'Cash on delivery — settle manually once cash is collected.'],
+            'meta' => ['note' => 'Cash on delivery - settle manually once cash is collected.'],
         ];
+    }
+
+    public function verifyWebhook(array $payload, array $headers = []): array
+    {
+        throw new \LogicException('COD has no online webhook; settle it through the authenticated staff flow.');
     }
 }

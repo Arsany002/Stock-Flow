@@ -61,6 +61,7 @@ class PurchaseOrderService
         private readonly BusinessAccountRepositoryInterface $businessAccounts,
         private readonly StockService $stock,
         private readonly QuoteService $quotes,
+        private readonly AuditService $audit,
     ) {}
 
     public function find(string $id): ?PurchaseOrder
@@ -155,7 +156,15 @@ class PurchaseOrderService
 
             $this->businessAccounts->update($account, ['outstanding_balance' => $projectedBalance]);
 
-            return $this->purchaseOrders->update($purchaseOrder, ['status' => PurchaseOrderStatus::Approved]);
+            $updated = $this->purchaseOrders->update($purchaseOrder, ['status' => PurchaseOrderStatus::Approved]);
+
+            $this->audit->record('po.approved', $updated, $approver, [
+                'total' => $purchaseOrder->total,
+                'note' => $note,
+                'outstanding_balance_after' => $projectedBalance,
+            ]);
+
+            return $updated;
         });
     }
 
@@ -177,7 +186,14 @@ class PurchaseOrderService
                 'note' => $note,
             ]);
 
-            return $this->purchaseOrders->update($purchaseOrder, ['status' => PurchaseOrderStatus::Rejected]);
+            $updated = $this->purchaseOrders->update($purchaseOrder, ['status' => PurchaseOrderStatus::Rejected]);
+
+            $this->audit->record('po.rejected', $updated, $approver, [
+                'total' => $purchaseOrder->total,
+                'note' => $note,
+            ]);
+
+            return $updated;
         });
     }
 

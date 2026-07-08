@@ -27,11 +27,11 @@ class StoreCheckoutRequest extends FormRequest
         return [
             'payment_method' => ['required', Rule::in([
                 PaymentMethod::Cod->value,
-                PaymentMethod::Fake->value,
+                PaymentMethod::FakeGateway->value,
                 PaymentMethod::Paymob->value,
                 PaymentMethod::Fawry->value,
             ])],
-            // Only meaningful for payment_method=fake — lets a demo/test
+            // Only meaningful for payment_method=fake_gateway — lets a demo/test
             // checkout choose the simulated outcome. Ignored by every other
             // gateway driver.
             'outcome' => ['nullable', Rule::in(['succeed', 'fail'])],

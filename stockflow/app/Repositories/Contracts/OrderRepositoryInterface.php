@@ -31,4 +31,17 @@ interface OrderRepositoryInterface
      * @return Collection<int, Order>
      */
     public function expiredReservations(): Collection;
+
+    /**
+     * Paginated, filterable listing for the Sales report.
+     *
+     * @param  array<string, mixed>  $filters  status, user_id, product_id, warehouse_id, date_from, date_to
+     */
+    public function paginateForSalesReport(int $perPage, array $filters = []): LengthAwarePaginator;
+
+    /**
+     * Sum of `total` for confirmed/fulfilled orders created since
+     * $since — the dashboard's "today's sales" KPI.
+     */
+    public function salesTotalSince(\DateTimeInterface $since): string;
 }

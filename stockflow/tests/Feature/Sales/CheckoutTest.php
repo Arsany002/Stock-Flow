@@ -102,7 +102,7 @@ class CheckoutTest extends TestCase
         ['product' => $product, 'warehouse' => $warehouse] = $this->productWithRetailStock(quantity: 10);
 
         $this->actingAs($customer)->post('/cart', ['product_id' => $product->id, 'quantity' => 4]);
-        $this->actingAs($customer)->post('/checkout', ['payment_method' => 'fake', 'outcome' => 'succeed']);
+        $this->actingAs($customer)->post('/checkout', ['payment_method' => 'fake_gateway', 'outcome' => 'succeed']);
 
         $order = Order::query()->where('user_id', $customer->id)->firstOrFail();
         $this->assertSame(OrderStatus::Confirmed, $order->status);
@@ -123,7 +123,7 @@ class CheckoutTest extends TestCase
         ['product' => $product, 'warehouse' => $warehouse] = $this->productWithRetailStock(quantity: 10);
 
         $this->actingAs($customer)->post('/cart', ['product_id' => $product->id, 'quantity' => 4]);
-        $this->actingAs($customer)->post('/checkout', ['payment_method' => 'fake', 'outcome' => 'fail']);
+        $this->actingAs($customer)->post('/checkout', ['payment_method' => 'fake_gateway', 'outcome' => 'fail']);
 
         $order = Order::query()->where('user_id', $customer->id)->firstOrFail();
         $this->assertSame(OrderStatus::Cancelled, $order->status);

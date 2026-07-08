@@ -57,6 +57,7 @@ class StockService
     public function __construct(
         private readonly StockRepositoryInterface $stock,
         private readonly WarehouseRepositoryInterface $warehouses,
+        private readonly AuditService $audit,
     ) {}
 
     /**
@@ -295,7 +296,20 @@ class StockService
 
             $this->recordMovement(MovementType::Adjustment, $product, $warehouse, $signedQuantity, $actor, null, $reason);
 
-            return $this->stock->updateLevel($level, ['on_hand' => $newOnHand]);
+            $updated = $this->stock->updateLevel($level, ['on_hand' => $newOnHand]);
+
+            // Requirement #2 of the admin/audit module: stock adjustments
+            // are one of the explicitly audited event categories, on top
+            // of (not instead of) the immutable stock_movements row above.
+            $this->audit->record('stock.adjusted', $updated, $actor, [
+                'product_id' => $product->id,
+                'warehouse_id' => $warehouse->id,
+                'signed_quantity' => $signedQuantity,
+                'reason' => $reason,
+                'on_hand_after' => $newOnHand,
+            ]);
+
+            return $updated;
         });
     }
 

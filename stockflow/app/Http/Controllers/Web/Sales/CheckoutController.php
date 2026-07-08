@@ -19,7 +19,7 @@ class CheckoutController extends Controller
     /** Methods a B2C customer can actually pick at checkout — see requirement #7. */
     private const CHECKOUT_METHODS = [
         PaymentMethod::Cod,
-        PaymentMethod::Fake,
+        PaymentMethod::FakeGateway,
         PaymentMethod::Paymob,
         PaymentMethod::Fawry,
     ];
@@ -70,7 +70,7 @@ class CheckoutController extends Controller
 
         $data = $request->validated();
         $method = PaymentMethod::from($data['payment_method']);
-        $paymentOptions = $method === PaymentMethod::Fake
+        $paymentOptions = $method === PaymentMethod::FakeGateway
             ? ['outcome' => $data['outcome'] ?? 'succeed']
             : [];
 

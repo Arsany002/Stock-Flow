@@ -125,7 +125,7 @@ class PurchaseOrderController extends Controller
     {
         $this->authorize('settle', $purchaseOrder);
 
-        return Inertia::render('Procurement/PurchaseOrders/BankTransferSettlement', [
+        return Inertia::render('Payments/BankTransferReview', [
             'purchaseOrder' => [
                 'id' => $purchaseOrder->id,
                 'status' => $purchaseOrder->status->value,
@@ -139,12 +139,11 @@ class PurchaseOrderController extends Controller
         $payment = $this->payments->initiate(
             $purchaseOrder,
             PaymentMethod::BankTransfer,
-            (float) $purchaseOrder->total,
+            (string) $purchaseOrder->total,
             ['reference' => $request->validated('reference')]
         );
 
-        $this->payments->settleManually($payment);
-        $this->purchaseOrders->settle($purchaseOrder, Auth::user());
+        $this->payments->settleManually($payment, Auth::user());
 
         return redirect()->route('procurement.purchase-orders.show', $purchaseOrder)
             ->with('flash.success', 'Bank transfer settled — order fulfilled.');

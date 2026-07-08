@@ -123,7 +123,34 @@ class StockRepository implements StockRepositoryInterface
             ->when($filters['product_id'] ?? null, fn ($query, $id) => $query->where('product_id', $id))
             ->when($filters['warehouse_id'] ?? null, fn ($query, $id) => $query->where('warehouse_id', $id))
             ->when($filters['type'] ?? null, fn ($query, $type) => $query->where('type', $type))
+            // actor_id ("user") and date_from/date_to power the Stock
+            // Movement report's filters — additive, the Stock/Movements
+            // page itself only ever passes product_id/warehouse_id/type.
+            ->when($filters['actor_id'] ?? null, fn ($query, $id) => $query->where('actor_id', $id))
+            ->when($filters['date_from'] ?? null, fn ($query, $date) => $query->where('created_at', '>=', $date))
+            ->when($filters['date_to'] ?? null, fn ($query, $date) => $query->where('created_at', '<=', $date))
             ->orderBy('created_at', 'desc')
+            ->paginate($perPage)
+            ->withQueryString();
+    }
+
+    /**
+     * Stock levels whose available (on_hand - reserved) is at or below
+     * $threshold — the Low Stock report. Uses the existing
+     * (product_id, warehouse_id) unique index for the product/warehouse
+     * filters; `available` isn't a stored column so the threshold
+     * comparison itself is necessarily a computed-expression filter, not
+     * an index seek — acceptable at this table's scale (one row per
+     * product/warehouse pair, never per-movement).
+     */
+    public function paginateLowStockLevels(int $threshold, int $perPage, array $filters = []): LengthAwarePaginator
+    {
+        return StockLevel::query()
+            ->with(['product:id,name,sku', 'warehouse:id,name,code'])
+            ->whereRaw('(on_hand - reserved) <= ?', [$threshold])
+            ->when($filters['product_id'] ?? null, fn ($query, $id) => $query->where('product_id', $id))
+            ->when($filters['warehouse_id'] ?? null, fn ($query, $id) => $query->where('warehouse_id', $id))
+            ->orderByRaw('(on_hand - reserved) asc')
             ->paginate($perPage)
             ->withQueryString();
     }
@@ -166,5 +193,12 @@ class StockRepository implements StockRepositoryInterface
             ->get()
             ->sortByDesc(fn (StockLevel $level) => $level->available)
             ->values();
+    }
+
+    public function countLowStockLevels(int $threshold): int
+    {
+        return StockLevel::query()
+            ->whereRaw('(on_hand - reserved) <= ?', [$threshold])
+            ->count();
     }
 }
