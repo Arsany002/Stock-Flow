@@ -12,6 +12,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * NOTE: deliberately no `quantity` attribute/accessor here. Stock is only
  * ever read via stockLevels()/stock_movements — see
  * docs/project/canonical-decisions.md §6.
+ *
+ * @property-read Category|null $category
  */
 class Product extends Model
 {

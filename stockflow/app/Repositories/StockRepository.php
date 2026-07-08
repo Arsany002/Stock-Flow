@@ -201,4 +201,29 @@ class StockRepository implements StockRepositoryInterface
             ->whereRaw('(on_hand - reserved) <= ?', [$threshold])
             ->count();
     }
+
+    public function availabilityForProduct(string $productId): int
+    {
+        return (int) StockLevel::query()
+            ->where('product_id', $productId)
+            ->whereHas('warehouse', fn ($query) => $query->where('is_active', true))
+            ->selectRaw('COALESCE(SUM(on_hand - reserved), 0) as total')
+            ->value('total');
+    }
+
+    public function availabilityForProducts(array $productIds): array
+    {
+        if ($productIds === []) {
+            return [];
+        }
+
+        return StockLevel::query()
+            ->whereIn('product_id', $productIds)
+            ->whereHas('warehouse', fn ($query) => $query->where('is_active', true))
+            ->selectRaw('product_id, COALESCE(SUM(on_hand - reserved), 0) as total')
+            ->groupBy('product_id')
+            ->pluck('total', 'product_id')
+            ->map(fn ($total) => (int) $total)
+            ->all();
+    }
 }

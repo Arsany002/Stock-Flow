@@ -37,4 +37,19 @@ class OutOfStockException extends DomainException
             ['product_id' => $productId, 'requested' => $requested]
         );
     }
+
+    /**
+     * Thrown by CartService::add() when the total desired quantity (already
+     * in the cart plus this addition) exceeds stock available across every
+     * active warehouse combined. Not tied to one warehouse — adding to cart
+     * never picks or reserves one; that only happens at authenticated
+     * checkout via StockService::bestWarehouseFor()/reserve().
+     */
+    public static function forCartAddition(string $productId, int $requested, int $available): self
+    {
+        return new self(
+            'Requested quantity is not available.',
+            ['product_id' => $productId, 'requested' => $requested, 'available' => $available]
+        );
+    }
 }

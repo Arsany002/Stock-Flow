@@ -2,7 +2,10 @@
 
 namespace App\Services;
 
+use App\Exceptions\OutOfStockException;
+use App\Exceptions\ProductUnavailableException;
 use App\Models\Product;
+use App\Repositories\Contracts\ProductRepositoryInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Session;
 
@@ -15,17 +18,35 @@ use Illuminate\Support\Facades\Session;
  * cart table + cleanup job for what is, until checkout, disposable state.
  * Prices are always looked up fresh (never cached in the session), so a
  * price-list change is reflected immediately.
+ *
+ * Deliberately never touches StockService: adding to (or updating) the
+ * cart only ever writes to the session. No stock_movements row, no
+ * reservation, is ever created here — that only happens once an
+ * authenticated checkout calls OrderService::checkout(), which delegates
+ * to StockService. This is what makes a guest cart safe to expose with no
+ * login at all. Because it's plain Laravel session state, it survives a
+ * login/logout transition for free — Laravel regenerates the session ID
+ * on login (AuthService::login()) but keeps the session's data, so a
+ * guest's cart is still there once they authenticate.
  */
 class CartService
 {
     private const SESSION_KEY = 'cart';
 
-    public function __construct(private readonly CatalogService $catalog) {}
+    public function __construct(
+        private readonly CatalogService $catalog,
+        private readonly ProductRepositoryInterface $products,
+        private readonly StockAvailabilityService $availability,
+    ) {}
 
     public function add(string $productId, int $quantity): void
     {
         $cart = $this->raw();
-        $cart[$productId] = ($cart[$productId] ?? 0) + $quantity;
+        $desiredQuantity = ($cart[$productId] ?? 0) + $quantity;
+
+        $this->assertAvailableForCart($productId, $desiredQuantity);
+
+        $cart[$productId] = $desiredQuantity;
 
         $this->put($cart);
     }
@@ -37,6 +58,8 @@ class CartService
         if ($quantity < 1) {
             unset($cart[$productId]);
         } else {
+            $this->assertAvailableForCart($productId, $quantity);
+
             $cart[$productId] = $quantity;
         }
 
@@ -59,6 +82,16 @@ class CartService
     public function isEmpty(): bool
     {
         return $this->raw() === [];
+    }
+
+    /**
+     * Total item count across all lines (sum of quantities, not distinct
+     * line count) — shared on every Inertia response as `cart.count` for
+     * the storefront header badge.
+     */
+    public function count(): int
+    {
+        return array_sum($this->raw());
     }
 
     /**
@@ -119,6 +152,29 @@ class CartService
     private function raw(): array
     {
         return Session::get(self::SESSION_KEY, []);
+    }
+
+    /**
+     * Live, public-safe availability check for session cart mutations.
+     * This is not a reservation: checkout still re-prices and re-checks
+     * stock inside OrderService's authenticated transaction.
+     *
+     * @throws ProductUnavailableException
+     * @throws OutOfStockException
+     */
+    private function assertAvailableForCart(string $productId, int $desiredQuantity): void
+    {
+        $product = $this->products->find($productId);
+
+        if ($product === null || ! $product->is_active) {
+            throw ProductUnavailableException::forProduct($productId);
+        }
+
+        $available = $this->availability->totalAvailableFor($productId);
+
+        if ($desiredQuantity > $available) {
+            throw OutOfStockException::forCartAddition($productId, $desiredQuantity, $available);
+        }
     }
 
     /**

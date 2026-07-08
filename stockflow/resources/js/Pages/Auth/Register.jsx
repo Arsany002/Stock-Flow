@@ -3,27 +3,40 @@ import GuestLayout from '@/Layouts/GuestLayout';
 import Input from '@/Components/Input';
 import Button from '@/Components/Button';
 
-export default function Login() {
+export default function Register() {
     const { data, setData, post, processing, errors, reset } = useForm({
+        name: '',
         email: '',
         password: '',
-        remember: false,
+        password_confirmation: '',
     });
 
     function submit(event) {
         event.preventDefault();
-        post('/login', {
-            onFinish: () => reset('password'),
+        post('/register', {
+            onFinish: () => reset('password', 'password_confirmation'),
         });
     }
 
     return (
         <GuestLayout>
-            <Head title="Log in" />
+            <Head title="Create an account" />
 
-            <h1 className="mb-6 text-lg font-semibold text-gray-900">Log in to StockFlow</h1>
+            <h1 className="mb-6 text-lg font-semibold text-gray-900">Create your StockFlow account</h1>
 
             <form onSubmit={submit} className="flex flex-col gap-4">
+                <Input
+                    label="Name"
+                    type="text"
+                    name="name"
+                    autoComplete="name"
+                    value={data.name}
+                    error={errors.name}
+                    onChange={(e) => setData('name', e.target.value)}
+                    autoFocus
+                    required
+                />
+
                 <Input
                     label="Email"
                     type="email"
@@ -32,7 +45,6 @@ export default function Login() {
                     value={data.email}
                     error={errors.email}
                     onChange={(e) => setData('email', e.target.value)}
-                    autoFocus
                     required
                 />
 
@@ -40,32 +52,33 @@ export default function Login() {
                     label="Password"
                     type="password"
                     name="password"
-                    autoComplete="current-password"
+                    autoComplete="new-password"
                     value={data.password}
                     error={errors.password}
                     onChange={(e) => setData('password', e.target.value)}
                     required
                 />
 
-                <label className="flex items-center gap-2 text-sm text-gray-600">
-                    <input
-                        type="checkbox"
-                        checked={data.remember}
-                        onChange={(e) => setData('remember', e.target.checked)}
-                        className="rounded border-gray-300"
-                    />
-                    Remember me
-                </label>
+                <Input
+                    label="Confirm password"
+                    type="password"
+                    name="password_confirmation"
+                    autoComplete="new-password"
+                    value={data.password_confirmation}
+                    error={errors.password_confirmation}
+                    onChange={(e) => setData('password_confirmation', e.target.value)}
+                    required
+                />
 
                 <Button type="submit" disabled={processing} className="mt-2 w-full">
-                    Log in
+                    Create account
                 </Button>
             </form>
 
             <p className="mt-6 text-center text-sm text-gray-600">
-                Don&apos;t have an account?{' '}
-                <Link href="/register" className="font-medium text-gray-900 underline">
-                    Create one.
+                Already have an account?{' '}
+                <Link href="/login" className="font-medium text-gray-900 underline">
+                    Log in.
                 </Link>
             </p>
         </GuestLayout>

@@ -2,7 +2,9 @@
 
 namespace Tests\Feature\Auth;
 
+use App\Enums\UserRole;
 use App\Models\User;
+use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -10,6 +12,12 @@ use Tests\TestCase;
 class AuthenticationTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->seed(RolePermissionSeeder::class);
+    }
 
     public function test_login_page_renders(): void
     {
@@ -85,5 +93,64 @@ class AuthenticationTest extends TestCase
         // guard: a previously authenticated request to a protected route
         // must now be rejected.
         $this->get('/dashboard')->assertRedirect('/login');
+    }
+
+    public function test_guest_can_view_register_page(): void
+    {
+        $this->get('/register')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page->component('Auth/Register'));
+    }
+
+    public function test_guest_can_register_as_retail_customer(): void
+    {
+        $response = $this->post('/register', [
+            'name' => 'Retail Customer',
+            'email' => 'retail@example.com',
+            'password' => 'password',
+            'password_confirmation' => 'password',
+        ]);
+
+        $user = User::query()->where('email', 'retail@example.com')->firstOrFail();
+
+        $response->assertRedirect('/dashboard');
+        $this->assertAuthenticatedAs($user);
+        $this->assertTrue($user->hasRole(UserRole::RetailCustomer->value));
+    }
+
+    public function test_public_registration_assigns_only_retail_customer_role(): void
+    {
+        $this->post('/register', [
+            'name' => 'Ambitious Customer',
+            'email' => 'ambitious@example.com',
+            'password' => 'password',
+            'password_confirmation' => 'password',
+            'role' => UserRole::SuperAdmin->value,
+        ]);
+
+        $user = User::query()->where('email', 'ambitious@example.com')->firstOrFail();
+
+        $this->assertTrue($user->hasRole(UserRole::RetailCustomer->value));
+        $this->assertFalse($user->hasRole(UserRole::SuperAdmin->value));
+        $this->assertFalse($user->hasRole(UserRole::InventoryManager->value));
+        $this->assertFalse($user->hasRole(UserRole::SalesCashier->value));
+        $this->assertFalse($user->hasRole(UserRole::VendorSupplier->value));
+        $this->assertFalse($user->hasRole(UserRole::BusinessBuyer->value));
+    }
+
+    public function test_duplicate_email_registration_fails_validation(): void
+    {
+        User::factory()->create(['email' => 'taken@example.com']);
+
+        $response = $this->from('/register')->post('/register', [
+            'name' => 'Second Customer',
+            'email' => 'taken@example.com',
+            'password' => 'password',
+            'password_confirmation' => 'password',
+        ]);
+
+        $response->assertRedirect('/register');
+        $response->assertSessionHasErrors('email');
+        $this->assertGuest();
     }
 }

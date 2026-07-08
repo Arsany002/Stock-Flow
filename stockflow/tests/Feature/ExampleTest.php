@@ -2,18 +2,22 @@
 
 namespace Tests\Feature;
 
-// use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 class ExampleTest extends TestCase
 {
+    use RefreshDatabase;
+
     /**
-     * Guests hitting the root route are redirected to login.
+     * / is the public storefront home page — guests no longer get bounced
+     * to /login, see the storefront requirements' Guest rule #1. Superseded
+     * the previous "guests are redirected to login" expectation.
      */
-    public function test_guests_are_redirected_to_login(): void
+    public function test_guests_can_view_the_home_page(): void
     {
         $response = $this->get('/');
 
-        $response->assertRedirect('/login');
+        $response->assertOk();
     }
 }

@@ -12,20 +12,23 @@ ledger — `php artisan stock:reconcile` proves it.
 
 ## What's built so far
 
-- **Auth & authorization**: session login/logout (`web` guard only), Laratrust
-  roles/permissions with warehouse-scoped teams (one Laratrust team per warehouse),
-  Admin UI for user/role management and a read-only permission matrix.
-- **Catalog module**: products/categories/suppliers/price-lists CRUD, Redis-cached
-  reads, vendor-scoped price-list-item ownership.
+- **Auth & authorization**: session login/logout and public retail registration
+  (`web` guard only), Laratrust roles/permissions with warehouse-scoped teams (one
+  Laratrust team per warehouse), Admin UI for user/role management and a read-only
+  permission matrix.
+- **Catalog/storefront module**: products/categories/suppliers/price-lists CRUD,
+  Redis-cached reads, vendor-scoped price-list-item ownership, public product
+  browsing, and a session-backed guest cart.
 - **Stock engine** (the ledger/projection core): `StockService::purchaseIn() /
   reserve() / release() / confirmSale() / transfer() / adjust() / reconcile()`, all
   transactional and row-locked (see "The stock engine" below), plus a web UI
   (`/stock/levels`, `/stock/movements`, `/stock/adjustments`, `/stock/transfers`,
   `/stock/reconcile`) and `php artisan stock:reconcile`.
-- **B2C checkout module**: session-backed cart → checkout → payment → fulfillment.
-  `OrderService` owns `pending → reserved → confirmed → fulfilled` (or `cancelled`);
-  see "B2C checkout" below. Web UI at `/cart`, `/checkout`, `/orders`, `/orders/
-  {order}`, `/payments/{payment}`.
+- **B2C checkout module**: session-backed guest/customer cart → checkout → payment
+  → fulfillment. `CartService` validates requested quantities against live stock
+  without reserving anything; `OrderService` owns `pending → reserved → confirmed →
+  fulfilled` (or `cancelled`); see "B2C checkout" below. Web UI at `/products`,
+  `/cart`, `/checkout`, `/orders`, `/orders/{order}`, `/payments/{payment}`.
 - **B2B procurement module**: RFQ → quote → purchase order → approval → Bank
   Transfer settlement. `QuoteService` + `PurchaseOrderService` own two linked
   state machines; see "B2B procurement" below. Web UI at `/procurement/quotes/*`
@@ -48,9 +51,9 @@ ledger — `php artisan stock:reconcile` proves it.
   reports" below.
 - **Hardening**: Redis-cached stock levels report with flush-on-write
   invalidation, rate limiting (login/checkout/webhook/API), Laravel Horizon
-  (queue dashboard, SuperAdmin-gated), baseline security headers on every
-  response, Laravel Pint + Larastan static analysis, and a GitHub Actions CI
-  gate. See "Hardening" below.
+  (queue dashboard, SuperAdmin-gated), global security headers including CSP,
+  Laravel Pint + Larastan static analysis, and a GitHub Actions CI gate. See
+  "Hardening" below.
 - Not yet built: real Paymob/Fawry provider API calls/credentials.
 
 ## Requirements
@@ -72,12 +75,15 @@ docker compose exec app php artisan db:seed   # demo roles/users/warehouses/cata
 `npm-dev`, `npm-build`). `make quality` runs the full local gate (style + static
 analysis + tests) in one command — the same three steps CI runs.
 
-Visit `http://127.0.0.1:8000`. Guests are redirected to `/login`; authenticated users
-land on `/dashboard`. `DemoUserSeeder` creates a SuperAdmin login and
-`DemoBusinessAccountSeeder` creates a Business Buyer login (`buyer@stockflow.test`,
-password `password`) with a linked `business_accounts` row — both need
-`RolePermissionSeeder` to have run first, which a plain `db:seed` handles since
-seeders run in order.
+Visit `http://127.0.0.1:8000`. Public storefront pages are available to guests;
+authenticated users land on `/dashboard`. Use `/login` for seeded users or
+`/register` to create a Retail Customer account. Guest cart contents stay in the
+session through registration, so a guest sent from `/checkout` can register and
+continue checkout with the same cart. `DemoUserSeeder` creates a SuperAdmin login
+and `DemoBusinessAccountSeeder` creates a Business Buyer login
+(`buyer@stockflow.test`, password `password`) with a linked `business_accounts`
+row — both need `RolePermissionSeeder` to have run first, which a plain `db:seed`
+handles since seeders run in order.
 
 ## Local setup (without Docker)
 
@@ -202,7 +208,10 @@ staff-settled for B2B. `PaymentService` locks the payment row and marks it
 `paid`/`failed` inside the same DB transaction that confirms the order or releases
 the reservation, so duplicate callbacks are no-ops and cannot reduce stock twice.
 Cart is session-backed (`CartService`) — not a DB table, since only *order
-creation* is required to be database-backed.
+creation* is required to be database-backed. Cart add/update requests validate the
+desired total quantity against live `StockAvailabilityService` data and reject
+over-available quantities with a generic message; this protects the UX without
+revealing exact stock and without creating a reservation before checkout.
 
 ## B2B procurement
 
@@ -378,9 +387,10 @@ and [`docs/technical/indexing.md`](docs/technical/indexing.md). Summary:
   globally, sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
   `Referrer-Policy: strict-origin-when-cross-origin`,
   `Permissions-Policy: camera=(), microphone=(), geolocation=()` on every
-  response, plus `Strict-Transport-Security` on HTTPS requests. No CSP yet —
-  the React bundle has no nonce plumbing and a naive policy would break
-  inline styles some UI libraries rely on; deliberately deferred.
+  response, plus `Strict-Transport-Security` on HTTPS requests and a
+  `Content-Security-Policy` that keeps the app self-origin by default while
+  allowing the local Vite dev server (`localhost`/`127.0.0.1:5173`) and its
+  websocket in development/test.
 - **Code quality gate**: `pint.json` (Laravel preset), `phpstan.neon` +
   `phpstan-baseline.neon` (Larastan level 5 — 250 pre-existing findings
   baselined, mostly a documented Larastan false-positive class around enum
@@ -403,7 +413,7 @@ and [`docs/technical/indexing.md`](docs/technical/indexing.md). Summary:
 - [x] Reconciliation — `stock:reconcile` (pre-existing, re-verified: 0 drift)
 - [x] CI quality gates — GitHub Actions: pint, stan, full test suite
 - [x] Test coverage — added: `SeededSuperAdminAccessTest`, `StockLevelCacheTest` (×2), `CatalogCacheTest` product-update case, `RateLimitingTest` (×4), `HorizonAccessTest` (×3), `SecurityHeadersTest`
-- [x] Security headers — `SecurityHeaders` middleware, global
+- [x] Security headers — `SecurityHeaders` middleware, global, including CSP
 - [x] Laravel Pint — `pint.json`, clean across 299 files
 - [x] PHPStan/Larastan — level 5, baseline generated, 2 real issues fixed (`StockLevel` model docblocks)
 - [x] SuperAdmin unauthorized-access bug — fixed at the root cause (seeder cache flush), not just cleared once
@@ -412,6 +422,11 @@ Verification commands run before considering this pass complete:
 `php artisan test` (159 passed), `./vendor/bin/pint --test` (299 files, clean),
 `./vendor/bin/phpstan analyse` (no errors against baseline), `npm run build`
 (clean production build).
+
+Latest verification after storefront registration/cart/CSP updates:
+`docker compose exec app php artisan test` (197 tests, 966 assertions),
+`docker compose exec app php artisan stock:reconcile` (0 drift),
+`./vendor/bin/pint --test` (clean), and `npm run build` (clean production build).
 
 ## Project structure notes
 
@@ -432,9 +447,10 @@ Verification commands run before considering this pass complete:
   record-level authorization.
 - `resources/js/Pages/` — Inertia pages, resolved by `resources/js/app.jsx`, one
   folder per module (`Auth/`, `Admin/`, `Catalog/`, `Stock/`, `Sales/`,
-  `Procurement/`, `Import/`, `Reports/`).
+  `Storefront/`, `Procurement/`, `Import/`, `Reports/`).
 - `resources/js/Layouts/` — `AppLayout` (authenticated shell, renders
-  `FlashMessage`) and `GuestLayout` (centered card, used by the login page).
+  `FlashMessage`), `GuestLayout` (centered card, used by auth pages), and
+  `StorefrontLayout` (public catalog/cart shell).
 - `resources/js/Components/` — shared UI primitives: `Button`, `Input`, `Select`,
   `Table`, `Pagination`, `Breadcrumbs`, `FlashMessage`, `PermissionGate`.
 - `app/Http/Middleware/HandleInertiaRequests.php` — shares `auth.user`,

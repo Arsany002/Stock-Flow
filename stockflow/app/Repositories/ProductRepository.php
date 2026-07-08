@@ -25,6 +25,11 @@ class ProductRepository implements ProductRepositoryInterface
         return Product::query()->where('sku', $sku)->first();
     }
 
+    public function findActiveBySku(string $sku): ?Product
+    {
+        return Product::query()->where('sku', $sku)->where('is_active', true)->with('category')->first();
+    }
+
     public function paginate(int $perPage = 15, array $filters = []): LengthAwarePaginator
     {
         $query = Product::query()->with('category')->orderBy('name');
@@ -39,6 +44,21 @@ class ProductRepository implements ProductRepositoryInterface
 
         if (! empty($filters['supplier_id'])) {
             $query->where('supplier_id', $filters['supplier_id']);
+        }
+
+        return $query->paginate($perPage)->withQueryString();
+    }
+
+    public function publicPaginatedList(int $perPage = 15, array $filters = []): LengthAwarePaginator
+    {
+        $query = Product::query()->where('is_active', true)->with('category')->orderBy('name');
+
+        if (! empty($filters['search'])) {
+            $this->applySearch($query, $filters['search']);
+        }
+
+        if (! empty($filters['category_id'])) {
+            $query->where('category_id', $filters['category_id']);
         }
 
         return $query->paginate($perPage)->withQueryString();

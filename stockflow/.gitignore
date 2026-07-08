@@ -19,8 +19,16 @@
 /public/hot
 /public/storage
 /storage/*.key
+/storage/phpstan/
+/storage/phpstan/*
+storage/phpstan/
+storage/phpstan/*
 /storage/pail
 /vendor
+/.phpstan.cache/
+/.phpunit.cache/
+.phpstan.cache/
+.phpunit.cache/
 _ide_helper.php
 Homestead.json
 Homestead.yaml

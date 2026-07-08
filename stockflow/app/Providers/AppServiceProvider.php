@@ -78,6 +78,15 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(10)->by((string) $request->user()?->id);
         });
 
+        // Cart mutations (add/update/remove/clear) are reachable by guests
+        // with no login at all, so unlike 'checkout' this can't key on a
+        // guaranteed user id — falls back to IP for anonymous carts, user
+        // id once authenticated (so logging in doesn't reset a guest's
+        // remaining quota mid-session at the same IP).
+        RateLimiter::for('cart', function (Request $request) {
+            return Limit::perMinute(30)->by((string) ($request->user()?->id ?: $request->ip()));
+        });
+
         // Payment webhooks are server-to-server (Paymob/Fawry/the Fake
         // Gateway simulator), not interactive traffic — generous enough
         // that a legitimate retry storm from a gateway provider doesn't get

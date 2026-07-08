@@ -2,6 +2,8 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\CartService;
+use App\Services\StorefrontCatalogService;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -15,6 +17,11 @@ class HandleInertiaRequests extends Middleware
      * @var string
      */
     protected $rootView = 'app';
+
+    public function __construct(
+        private readonly CartService $cart,
+        private readonly StorefrontCatalogService $storefrontCatalog,
+    ) {}
 
     /**
      * Determines the current asset version.
@@ -52,6 +59,18 @@ class HandleInertiaRequests extends Middleware
                 'success' => fn () => $request->session()->get('flash.success'),
                 'error' => fn () => $request->session()->get('flash.error'),
             ],
+            // Cart is session state (guest or authenticated) — shared
+            // everywhere so the storefront header badge doesn't need a
+            // dedicated round trip. Session read only, cheap.
+            'cart' => [
+                'count' => fn () => $this->cart->count(),
+                'subtotal' => fn () => $this->cart->subtotal(),
+            ],
+            // Cached (StorefrontCatalogService -> CatalogService::
+            // listCategories(), tag 'catalog') — shared globally so
+            // StorefrontLayout's category nav renders on every storefront
+            // page without each controller having to pass it explicitly.
+            'publicCategories' => fn () => $this->storefrontCatalog->publicCategories(),
         ];
     }
 }

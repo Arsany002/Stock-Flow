@@ -32,7 +32,7 @@ class CheckoutTest extends TestCase
         $customer = $this->retailCustomer();
         ['product' => $product] = $this->productWithRetailStock(quantity: 10, price: '100.00');
 
-        $this->actingAs($customer)->post('/cart', ['product_id' => $product->id, 'quantity' => 2])
+        $this->actingAs($customer)->post('/cart/items', ['product_id' => $product->id, 'quantity' => 2])
             ->assertRedirect();
 
         $response = $this->actingAs($customer)->post('/checkout', ['payment_method' => 'cod']);
@@ -54,8 +54,8 @@ class CheckoutTest extends TestCase
         ['product' => $productA, 'warehouse' => $warehouseA] = $this->productWithRetailStock(quantity: 10);
         ['product' => $productB, 'warehouse' => $warehouseB] = $this->productWithRetailStock(quantity: 5);
 
-        $this->actingAs($customer)->post('/cart', ['product_id' => $productA->id, 'quantity' => 3]);
-        $this->actingAs($customer)->post('/cart', ['product_id' => $productB->id, 'quantity' => 2]);
+        $this->actingAs($customer)->post('/cart/items', ['product_id' => $productA->id, 'quantity' => 3]);
+        $this->actingAs($customer)->post('/cart/items', ['product_id' => $productB->id, 'quantity' => 2]);
         $this->actingAs($customer)->post('/checkout', ['payment_method' => 'cod']);
 
         $order = Order::query()->where('user_id', $customer->id)->firstOrFail();
@@ -76,11 +76,15 @@ class CheckoutTest extends TestCase
     {
         $customer = $this->retailCustomer();
         ['product' => $available] = $this->productWithRetailStock(quantity: 10);
-        ['product' => $scarce] = $this->productWithRetailStock(quantity: 1);
+        ['product' => $scarce, 'warehouse' => $scarceWarehouse] = $this->productWithRetailStock(quantity: 1);
 
-        $this->actingAs($customer)->post('/cart', ['product_id' => $available->id, 'quantity' => 5]);
-        // Requesting more than the single unit in stock.
-        $this->actingAs($customer)->post('/cart', ['product_id' => $scarce->id, 'quantity' => 5]);
+        $this->actingAs($customer)->post('/cart/items', ['product_id' => $available->id, 'quantity' => 5]);
+        $this->actingAs($customer)->post('/cart/items', ['product_id' => $scarce->id, 'quantity' => 1]);
+
+        // The cart was valid when built, then stock changed before the
+        // authenticated checkout transaction. Checkout must still catch
+        // that and roll back the whole order.
+        app(StockService::class)->adjust($scarce, $scarceWarehouse, -1, null, 'Sold before checkout.');
 
         $ordersBefore = Order::query()->count();
         $itemsBefore = OrderItem::query()->count();
@@ -101,7 +105,7 @@ class CheckoutTest extends TestCase
         $customer = $this->retailCustomer();
         ['product' => $product, 'warehouse' => $warehouse] = $this->productWithRetailStock(quantity: 10);
 
-        $this->actingAs($customer)->post('/cart', ['product_id' => $product->id, 'quantity' => 4]);
+        $this->actingAs($customer)->post('/cart/items', ['product_id' => $product->id, 'quantity' => 4]);
         $this->actingAs($customer)->post('/checkout', ['payment_method' => 'fake_gateway', 'outcome' => 'succeed']);
 
         $order = Order::query()->where('user_id', $customer->id)->firstOrFail();
@@ -122,7 +126,7 @@ class CheckoutTest extends TestCase
         $customer = $this->retailCustomer();
         ['product' => $product, 'warehouse' => $warehouse] = $this->productWithRetailStock(quantity: 10);
 
-        $this->actingAs($customer)->post('/cart', ['product_id' => $product->id, 'quantity' => 4]);
+        $this->actingAs($customer)->post('/cart/items', ['product_id' => $product->id, 'quantity' => 4]);
         $this->actingAs($customer)->post('/checkout', ['payment_method' => 'fake_gateway', 'outcome' => 'fail']);
 
         $order = Order::query()->where('user_id', $customer->id)->firstOrFail();

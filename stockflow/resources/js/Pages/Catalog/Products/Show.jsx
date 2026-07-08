@@ -19,7 +19,7 @@ export default function Show({ product }) {
 
     function addToCart(event) {
         event.preventDefault();
-        post('/cart', { preserveScroll: true });
+        post('/cart/items', { preserveScroll: true });
     }
 
     return (

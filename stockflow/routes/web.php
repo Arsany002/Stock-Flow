@@ -5,6 +5,7 @@ use App\Http\Controllers\Web\Admin\PermissionMatrixController;
 use App\Http\Controllers\Web\Admin\RoleController;
 use App\Http\Controllers\Web\Admin\UserController;
 use App\Http\Controllers\Web\Auth\LoginController;
+use App\Http\Controllers\Web\Auth\RegisterController;
 use App\Http\Controllers\Web\Catalog\CategoryController;
 use App\Http\Controllers\Web\Catalog\PriceListController;
 use App\Http\Controllers\Web\Catalog\PriceListItemController;
@@ -15,7 +16,6 @@ use App\Http\Controllers\Web\Import\ImportController;
 use App\Http\Controllers\Web\Procurement\PurchaseOrderController;
 use App\Http\Controllers\Web\Procurement\QuoteController;
 use App\Http\Controllers\Web\Reports\ReportController;
-use App\Http\Controllers\Web\Sales\CartController;
 use App\Http\Controllers\Web\Sales\CheckoutController;
 use App\Http\Controllers\Web\Sales\OrderController;
 use App\Http\Controllers\Web\Sales\PaymentController;
@@ -24,7 +24,11 @@ use App\Http\Controllers\Web\Stock\StockLevelController;
 use App\Http\Controllers\Web\Stock\StockMovementController;
 use App\Http\Controllers\Web\Stock\StockReconciliationController;
 use App\Http\Controllers\Web\Stock\StockTransferController;
-use Illuminate\Support\Facades\Auth;
+use App\Http\Controllers\Web\Storefront\CartController;
+use App\Http\Controllers\Web\Storefront\CategoryBrowseController;
+use App\Http\Controllers\Web\Storefront\HomeController;
+use App\Http\Controllers\Web\Storefront\ProductBrowseController;
+use App\Http\Controllers\Web\Storefront\SearchController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -37,15 +41,48 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::get('/', function () {
-    return Auth::check()
-        ? redirect()->route('dashboard')
-        : redirect()->route('login');
-})->name('home');
+// Public storefront: no `auth`, no `permission` middleware anywhere in this
+// section — guests must reach all of it with no login (see Guest rules
+// #1-#7 in the storefront requirements). Staff/business users still reach
+// `/dashboard` explicitly (post-login redirect target); `/` itself is the
+// storefront for everyone, guest or authenticated.
+Route::get('/', HomeController::class)->name('home');
+Route::get('/products', [ProductBrowseController::class, 'index'])->name('storefront.products.index');
+Route::get('/products/{sku}', [ProductBrowseController::class, 'show'])->name('storefront.products.show');
+Route::get('/categories/{category:slug}', [CategoryBrowseController::class, 'show'])->name('storefront.categories.show');
+Route::get('/search', [SearchController::class, 'index'])->name('storefront.search');
 
+// Session cart: also guest-accessible (Guest rules #8-#11). Never reserves
+// stock or writes anything but the session — see CartService's docblock.
+Route::get('/cart', [CartController::class, 'show'])->name('cart.show');
+Route::middleware('throttle:cart')->group(function () {
+    Route::post('/cart/items', [CartController::class, 'store'])->name('cart.items.store');
+    Route::patch('/cart/items/{item}', [CartController::class, 'update'])->name('cart.items.update');
+    Route::delete('/cart/items/{item}', [CartController::class, 'destroy'])->name('cart.items.destroy');
+    Route::delete('/cart', [CartController::class, 'clear'])->name('cart.clear');
+});
+
+// Checkout entry gate: `checkout.guard` redirects an unauthenticated
+// visitor to /login with a specific flash message (Guest rule #18) before
+// CheckoutController (and its own `sale.create` OrderPolicy check) ever
+// runs — see EnsureCheckoutIsAuthenticated's docblock for why this is a
+// middleware rather than a wrapper controller.
+Route::middleware('checkout.guard')->group(function () {
+    Route::get('/checkout', [CheckoutController::class, 'create'])->name('checkout.create');
+    Route::post('/checkout', [CheckoutController::class, 'store'])
+        ->name('checkout.store')->middleware('throttle:checkout');
+});
+
+// `guest` middleware redirects an already-authenticated visitor to
+// /dashboard automatically (Illuminate\Auth\Middleware\RedirectIfAuthenticated
+// checks for a `dashboard` route first) — that's Register rule #2, no
+// extra check needed in RegisterController itself.
 Route::middleware('guest')->group(function () {
     Route::get('/login', [LoginController::class, 'create'])->name('login');
     Route::post('/login', [LoginController::class, 'store'])->middleware('throttle:login');
+
+    Route::get('/register', [RegisterController::class, 'create'])->name('register');
+    Route::post('/register', [RegisterController::class, 'store'])->middleware('throttle:login');
 });
 
 Route::middleware('auth')->group(function () {
@@ -144,25 +181,17 @@ Route::middleware('auth')->group(function () {
             ->name('reconcile.run')->middleware('permission:stock.move|audit.read');
     });
 
-    // B2C checkout module. Cart/checkout/"my orders" are customer actions,
-    // gated by `sale.create` (cart has no Policy — it isn't a persisted
-    // record). /orders/{order} and /payments/{payment} are reachable by
-    // either the owning customer OR staff holding `payment.settle` (they
-    // need to see an order to settle its COD/placeholder payment), so
-    // those two stay behind plain `auth` with OrderPolicy::view() /
-    // PaymentPolicy::view() (checked in the controllers) doing the real
-    // record-level gate. See docs/project/canonical-decisions.md §2 and
-    // app/Services/OrderService.php.
+    // B2C "my orders" — a customer action gated by `sale.create`. Cart and
+    // checkout routes now live in the public storefront section above
+    // (guest-accessible; checkout itself is gated by `checkout.guard`, not
+    // `permission:sale.create`, since a guest has no permissions at all).
+    // /orders/{order} and /payments/{payment} are reachable by either the
+    // owning customer OR staff holding `payment.settle` (they need to see
+    // an order to settle its COD/placeholder payment), so those two stay
+    // behind plain `auth` with OrderPolicy::view() / PaymentPolicy::view()
+    // (checked in the controllers) doing the real record-level gate. See
+    // docs/project/canonical-decisions.md §2 and app/Services/OrderService.php.
     Route::middleware('permission:sale.create')->group(function () {
-        Route::get('/cart', [CartController::class, 'show'])->name('cart.show');
-        Route::post('/cart', [CartController::class, 'store'])->name('cart.store');
-        Route::put('/cart/{product}', [CartController::class, 'update'])->name('cart.update');
-        Route::delete('/cart/{product}', [CartController::class, 'destroy'])->name('cart.destroy');
-
-        Route::get('/checkout', [CheckoutController::class, 'create'])->name('checkout.create');
-        Route::post('/checkout', [CheckoutController::class, 'store'])
-            ->name('checkout.store')->middleware('throttle:checkout');
-
         Route::get('/orders', [OrderController::class, 'index'])->name('orders.index');
     });
 

@@ -5,6 +5,7 @@ use App\Exceptions\PaymentVerificationException;
 use App\Exceptions\UnauthorizedWarehouseException;
 use App\Http\Middleware\AuthenticateApiClientCredentials;
 use App\Http\Middleware\EnsureApiRequestsJson;
+use App\Http\Middleware\EnsureCheckoutIsAuthenticated;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\SecurityHeaders;
 use App\Http\Middleware\WarehouseScopeMiddleware;
@@ -44,6 +45,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'api.client-principal' => AuthenticateApiClientCredentials::class,
             'api.json' => EnsureApiRequestsJson::class,
+            'checkout.guard' => EnsureCheckoutIsAuthenticated::class,
             'scope' => CheckTokenForAnyScope::class,
             'scopes' => CheckToken::class,
             'warehouse.scope' => WarehouseScopeMiddleware::class,

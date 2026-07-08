@@ -8,6 +8,11 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @property-read string $id
+ * @property-read string $name
+ * @property-read string $slug
+ */
 class Category extends Model
 {
     use HasFactory, HasUuids;

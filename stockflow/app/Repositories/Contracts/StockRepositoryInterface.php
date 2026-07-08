@@ -110,4 +110,26 @@ interface StockRepositoryInterface
      * Cheap COUNT for the dashboard's "low stock" KPI.
      */
     public function countLowStockLevels(int $threshold): int;
+
+    /**
+     * Total available (on_hand - reserved) for a product summed across
+     * every active warehouse — used by the public storefront's In Stock /
+     * Low Stock / Out of Stock badge and cart-add validation. Deliberately
+     * uncached and live, like every other read in this interface: it feeds
+     * an "is this addable to cart" decision, and a stale answer here would
+     * let a guest add an item that's actually sold out (final validation
+     * still happens again at authenticated checkout regardless).
+     */
+    public function availabilityForProduct(string $productId): int;
+
+    /**
+     * Batched form of availabilityForProduct() for listing/search/category
+     * pages — one grouped query instead of N, keyed by product_id. Products
+     * with no stock_levels row at all are simply absent from the result
+     * (callers should default missing entries to 0).
+     *
+     * @param  list<string>  $productIds
+     * @return array<string, int>
+     */
+    public function availabilityForProducts(array $productIds): array;
 }
