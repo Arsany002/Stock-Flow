@@ -3,7 +3,9 @@
 use App\Exceptions\DomainException;
 use App\Exceptions\PaymentVerificationException;
 use App\Exceptions\UnauthorizedWarehouseException;
+use App\Http\Middleware\AdaptiveThrottle;
 use App\Http\Middleware\AuthenticateApiClientCredentials;
+use App\Http\Middleware\EnsureAbacAllowed;
 use App\Http\Middleware\EnsureApiRequestsJson;
 use App\Http\Middleware\EnsureCheckoutIsAuthenticated;
 use App\Http\Middleware\HandleInertiaRequests;
@@ -49,6 +51,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'scope' => CheckTokenForAnyScope::class,
             'scopes' => CheckToken::class,
             'warehouse.scope' => WarehouseScopeMiddleware::class,
+            'adaptive.throttle' => AdaptiveThrottle::class,
+            'abac' => EnsureAbacAllowed::class,
         ]);
 
         $middleware->prependToPriorityList(

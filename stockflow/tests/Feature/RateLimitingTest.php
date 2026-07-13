@@ -73,4 +73,21 @@ class RateLimitingTest extends TestCase
         $this->postJson('/webhooks/v1/fake-gateway', [])
             ->assertStatus(429);
     }
+
+    /**
+     * The adaptive throttle's `payment` profile (block_after=40, see
+     * config/abac.php) now sits in front of the plain 60/min named
+     * `throttle:webhook` limiter above and triggers first — see
+     * AdaptiveThrottle middleware in routes/webhooks.php.
+     */
+    public function test_payment_webhook_is_blocked_by_adaptive_throttle_before_the_named_limiter(): void
+    {
+        for ($i = 0; $i < 40; $i++) {
+            $this->postJson('/webhooks/v1/fake-gateway', []);
+        }
+
+        $this->postJson('/webhooks/v1/fake-gateway', [])
+            ->assertStatus(429)
+            ->assertJson(['code' => 'rate_limited_blocked']);
+    }
 }

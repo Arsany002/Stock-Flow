@@ -25,6 +25,7 @@ enum PermissionName: string
     case UserManage = 'user.manage';
     case RoleManage = 'role.manage';
     case AuditRead = 'audit.read';
+    case AccessManage = 'access.manage';
 
     public function label(): string
     {
@@ -46,6 +47,7 @@ enum PermissionName: string
             self::UserManage => 'Manage users',
             self::RoleManage => 'Manage roles',
             self::AuditRead => 'Read audit log',
+            self::AccessManage => 'Manage working hours & access windows',
         };
     }
 }

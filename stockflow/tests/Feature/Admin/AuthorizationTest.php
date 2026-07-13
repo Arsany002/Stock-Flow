@@ -33,7 +33,7 @@ class AuthorizationTest extends TestCase
         $response->assertInertia(fn (Assert $page) => $page
             ->component('Admin/Permissions/Matrix')
             ->has('roles', 6)
-            ->has('permissions', 17)
+            ->has('permissions', 18)
         );
     }
 

@@ -32,6 +32,8 @@ class DatabaseSeeder extends Seeder
             DemoWarehouseSeeder::class,
             DemoCatalogSeeder::class,
             DemoBusinessAccountSeeder::class,
+            CompanyWorkingHourSeeder::class,
+            PermissionAccessWindowSeeder::class,
         ]);
     }
 }

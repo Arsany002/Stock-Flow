@@ -1,0 +1,21 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Model;
+
+class CompanyWorkingHour extends Model
+{
+    use HasUuids;
+
+    protected $guarded = [];
+
+    protected function casts(): array
+    {
+        return [
+            'day_of_week' => 'integer',
+            'is_open' => 'boolean',
+        ];
+    }
+}

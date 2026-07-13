@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Web\Admin\AccessWindowController;
 use App\Http\Controllers\Web\Admin\AuditLogController;
 use App\Http\Controllers\Web\Admin\PermissionMatrixController;
 use App\Http\Controllers\Web\Admin\RoleController;
@@ -29,6 +30,7 @@ use App\Http\Controllers\Web\Storefront\CategoryBrowseController;
 use App\Http\Controllers\Web\Storefront\HomeController;
 use App\Http\Controllers\Web\Storefront\ProductBrowseController;
 use App\Http\Controllers\Web\Storefront\SearchController;
+use App\Support\Access\AccessAction;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -47,15 +49,21 @@ use Illuminate\Support\Facades\Route;
 // `/dashboard` explicitly (post-login redirect target); `/` itself is the
 // storefront for everyone, guest or authenticated.
 Route::get('/', HomeController::class)->name('home');
-Route::get('/products', [ProductBrowseController::class, 'index'])->name('storefront.products.index');
-Route::get('/products/{sku}', [ProductBrowseController::class, 'show'])->name('storefront.products.show');
-Route::get('/categories/{category:slug}', [CategoryBrowseController::class, 'show'])->name('storefront.categories.show');
-Route::get('/search', [SearchController::class, 'index'])->name('storefront.search');
+
+// Adaptive throttling only (public_read profile) — never `abac`, per
+// requirement #4: public storefront browsing must never be broken by
+// working-hour/access-window rules.
+Route::middleware('adaptive.throttle:public_read,'.AccessAction::STOREFRONT_BROWSE)->group(function () {
+    Route::get('/products', [ProductBrowseController::class, 'index'])->name('storefront.products.index');
+    Route::get('/products/{sku}', [ProductBrowseController::class, 'show'])->name('storefront.products.show');
+    Route::get('/categories/{category:slug}', [CategoryBrowseController::class, 'show'])->name('storefront.categories.show');
+    Route::get('/search', [SearchController::class, 'index'])->name('storefront.search');
+});
 
 // Session cart: also guest-accessible (Guest rules #8-#11). Never reserves
 // stock or writes anything but the session — see CartService's docblock.
 Route::get('/cart', [CartController::class, 'show'])->name('cart.show');
-Route::middleware('throttle:cart')->group(function () {
+Route::middleware(['throttle:cart', 'adaptive.throttle:cart_mutation,'.AccessAction::CART_MUTATE])->group(function () {
     Route::post('/cart/items', [CartController::class, 'store'])->name('cart.items.store');
     Route::patch('/cart/items/{item}', [CartController::class, 'update'])->name('cart.items.update');
     Route::delete('/cart/items/{item}', [CartController::class, 'destroy'])->name('cart.items.destroy');
@@ -67,10 +75,11 @@ Route::middleware('throttle:cart')->group(function () {
 // CheckoutController (and its own `sale.create` OrderPolicy check) ever
 // runs — see EnsureCheckoutIsAuthenticated's docblock for why this is a
 // middleware rather than a wrapper controller.
-Route::middleware('checkout.guard')->group(function () {
+Route::middleware(['checkout.guard', 'adaptive.throttle:checkout,'.AccessAction::CHECKOUT_CONFIRM])->group(function () {
     Route::get('/checkout', [CheckoutController::class, 'create'])->name('checkout.create');
     Route::post('/checkout', [CheckoutController::class, 'store'])
-        ->name('checkout.store')->middleware('throttle:checkout');
+        ->name('checkout.store')
+        ->middleware(['throttle:checkout', 'abac:'.AccessAction::CHECKOUT_CONFIRM.',sale.create']);
 });
 
 // `guest` middleware redirects an already-authenticated visitor to
@@ -79,10 +88,12 @@ Route::middleware('checkout.guard')->group(function () {
 // extra check needed in RegisterController itself.
 Route::middleware('guest')->group(function () {
     Route::get('/login', [LoginController::class, 'create'])->name('login');
-    Route::post('/login', [LoginController::class, 'store'])->middleware('throttle:login');
+    Route::post('/login', [LoginController::class, 'store'])
+        ->middleware(['throttle:login', 'adaptive.throttle:auth,'.AccessAction::AUTH_LOGIN]);
 
     Route::get('/register', [RegisterController::class, 'create'])->name('register');
-    Route::post('/register', [RegisterController::class, 'store'])->middleware('throttle:login');
+    Route::post('/register', [RegisterController::class, 'store'])
+        ->middleware(['throttle:login', 'adaptive.throttle:auth,'.AccessAction::AUTH_REGISTER]);
 });
 
 Route::middleware('auth')->group(function () {
@@ -90,7 +101,7 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
 
-    Route::prefix('admin')->name('admin.')->group(function () {
+    Route::prefix('admin')->name('admin.')->middleware('adaptive.throttle:admin,'.AccessAction::ADMIN_MANAGE)->group(function () {
         Route::middleware('permission:user.manage')->group(function () {
             Route::get('/users', [UserController::class, 'index'])->name('users.index');
             Route::get('/users/{user}/roles', [UserController::class, 'editRoles'])->name('users.edit-roles');
@@ -98,17 +109,27 @@ Route::middleware('auth')->group(function () {
 
         Route::put('/users/{user}/roles', [UserController::class, 'updateRoles'])
             ->name('users.update-roles')
-            ->middleware('permission:role.manage');
+            ->middleware(['permission:role.manage', 'abac:'.AccessAction::ADMIN_MANAGE.',user.manage']);
 
         Route::middleware('permission:role.manage')->group(function () {
             Route::get('/roles', [RoleController::class, 'index'])->name('roles.index');
             Route::put('/roles/{role}/permissions', [RoleController::class, 'updatePermissions'])
-                ->name('roles.update-permissions');
+                ->name('roles.update-permissions')
+                ->middleware('abac:'.AccessAction::ADMIN_MANAGE.',role.manage');
             Route::get('/permissions/matrix', [PermissionMatrixController::class, 'index'])->name('permissions.matrix');
         });
 
         Route::get('/audit-log', [AuditLogController::class, 'index'])
             ->name('audit-log.index')->middleware('permission:audit.read');
+
+        Route::middleware('permission:access.manage')->prefix('access')->name('access.')->group(function () {
+            Route::get('/company-hours', [AccessWindowController::class, 'companyHours'])->name('company-hours.index');
+            Route::put('/company-hours', [AccessWindowController::class, 'updateCompanyHours'])->name('company-hours.update');
+            Route::get('/permission-windows', [AccessWindowController::class, 'permissionWindows'])->name('permission-windows.index');
+            Route::post('/permission-windows', [AccessWindowController::class, 'storePermissionWindow'])->name('permission-windows.store');
+            Route::put('/permission-windows/{window}', [AccessWindowController::class, 'updatePermissionWindow'])->name('permission-windows.update');
+            Route::delete('/permission-windows/{window}', [AccessWindowController::class, 'destroyPermissionWindow'])->name('permission-windows.destroy');
+        });
     });
 
     Route::prefix('catalog')->name('catalog.')->group(function () {
@@ -168,12 +189,22 @@ Route::middleware('auth')->group(function () {
         Route::get('/adjustments/create', [StockAdjustmentController::class, 'create'])
             ->name('adjustments.create')->middleware('permission:stock.move');
         Route::post('/adjustments', [StockAdjustmentController::class, 'store'])
-            ->name('adjustments.store')->middleware(['permission:stock.move', 'warehouse.scope:stock.move']);
+            ->name('adjustments.store')->middleware([
+                'permission:stock.move',
+                'warehouse.scope:stock.move',
+                'adaptive.throttle:stock,'.AccessAction::STOCK_MOVE,
+                'abac:'.AccessAction::STOCK_MOVE.',stock.move',
+            ]);
 
         Route::get('/transfers/create', [StockTransferController::class, 'create'])
             ->name('transfers.create')->middleware('permission:stock.transfer');
         Route::post('/transfers', [StockTransferController::class, 'store'])
-            ->name('transfers.store')->middleware(['permission:stock.transfer', 'warehouse.scope:stock.transfer']);
+            ->name('transfers.store')->middleware([
+                'permission:stock.transfer',
+                'warehouse.scope:stock.transfer',
+                'adaptive.throttle:stock,'.AccessAction::STOCK_TRANSFER,
+                'abac:'.AccessAction::STOCK_TRANSFER.',stock.transfer',
+            ]);
 
         Route::get('/reconcile', [StockReconciliationController::class, 'show'])
             ->name('reconcile.show')->middleware('permission:stock.move|audit.read');
@@ -207,7 +238,12 @@ Route::middleware('auth')->group(function () {
     Route::middleware('permission:import.run')->prefix('imports')->name('imports.')->group(function () {
         Route::get('/', [ImportController::class, 'index'])->name('index');
         Route::get('/create', [ImportController::class, 'create'])->name('create');
-        Route::post('/', [ImportController::class, 'store'])->name('store');
+        Route::post('/', [ImportController::class, 'store'])
+            ->name('store')
+            ->middleware([
+                'adaptive.throttle:admin,'.AccessAction::IMPORT_RUN,
+                'abac:'.AccessAction::IMPORT_RUN.',import.run',
+            ]);
         Route::get('/{importBatch}/errors', [ImportController::class, 'errorReport'])->name('errors');
         Route::get('/{importBatch}/errors/download', [ImportController::class, 'downloadErrorReport'])->name('errors.download');
         Route::get('/{importBatch}', [ImportController::class, 'show'])->name('show');
@@ -219,7 +255,11 @@ Route::middleware('auth')->group(function () {
     Route::post('/orders/{order}/fulfill', [OrderController::class, 'fulfill'])
         ->name('orders.fulfill')->middleware('permission:payment.settle');
     Route::post('/payments/{payment}/settle', [PaymentController::class, 'settle'])
-        ->name('payments.settle')->middleware('permission:payment.settle');
+        ->name('payments.settle')->middleware([
+            'permission:payment.settle',
+            'adaptive.throttle:payment,'.AccessAction::PAYMENT_SETTLE,
+            'abac:'.AccessAction::PAYMENT_SETTLE.',payment.settle',
+        ]);
 
     // B2B procurement module. Visibility across the whole /procurement
     // group is gated broadly to anyone who could plausibly need it
@@ -252,7 +292,11 @@ Route::middleware('auth')->group(function () {
             Route::get('/purchase-orders/{purchaseOrder}/approve', [PurchaseOrderController::class, 'approveCreate'])
                 ->name('purchase-orders.approve.create')->middleware('permission:po.approve');
             Route::post('/purchase-orders/{purchaseOrder}/approve', [PurchaseOrderController::class, 'approve'])
-                ->name('purchase-orders.approve.store')->middleware('permission:po.approve');
+                ->name('purchase-orders.approve.store')->middleware([
+                    'permission:po.approve',
+                    'adaptive.throttle:admin,'.AccessAction::PO_APPROVE,
+                    'abac:'.AccessAction::PO_APPROVE.',po.approve',
+                ]);
             Route::post('/purchase-orders/{purchaseOrder}/reject', [PurchaseOrderController::class, 'reject'])
                 ->name('purchase-orders.reject')->middleware('permission:po.approve');
             Route::get('/purchase-orders/{purchaseOrder}/bank-transfer', [PurchaseOrderController::class, 'bankTransferCreate'])

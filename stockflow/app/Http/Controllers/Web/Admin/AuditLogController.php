@@ -27,6 +27,7 @@ class AuditLogController extends Controller
         'payment.settled',
         'user.roles_updated',
         'role.permissions_updated',
+        'security.rate_limit_blocked',
     ];
 
     public function __construct(private readonly AuditService $audit) {}

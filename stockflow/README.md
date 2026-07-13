@@ -465,7 +465,22 @@ Seeded by `RolePermissionSeeder` per the Enterprise PRD §3 permission matrix:
 `catalog.read`, `product.manage`, `category.manage`, `warehouse.manage`,
 `stock.read`, `stock.move`, `stock.transfer`, `import.run`, `pricelist.manage`,
 `sale.create`, `quote.request`, `quote.price`, `po.approve`, `payment.settle`,
-`user.manage`, `role.manage`, `audit.read`.
+`user.manage`, `role.manage`, `audit.read`, `access.manage`.
+
+## ABAC and working hours
+
+A layer on top of (not instead of) Laratrust RBAC: `AbacService` answers "can
+this user do this *right now*", checking a global `company_working_hours`
+schedule and stricter, overriding `permission_access_windows` rows (e.g.
+Inventory Managers can only `stock.move` Sat-Thu 09:00-17:00 Africa/Cairo by
+default). SuperAdmin bypasses time windows by default but never bypasses
+adaptive rate limiting. Separately, `AdaptiveThrottleService` adds a
+graduated slow-down-then-block layer (per-action, per-user/IP) on top of the
+existing named rate limiters. Managed at `/admin/access/company-hours` and
+`/admin/access/permission-windows` (gated by `access.manage`). See
+[`docs/technical/abac.md`](docs/technical/abac.md) and
+[`docs/technical/rate-limiting.md`](docs/technical/rate-limiting.md) for the
+full write-up.
 
 ## Not yet built
 
