@@ -77,7 +77,8 @@ matrix; demo users seeded by `DemoUserSeeder` (SuperAdmin) and
   `artisan horizon`, `scheduler`, `vite` services). `make start` / `make test` /
   `make migrate` / `make quality` etc. — see `stockflow/Makefile` and
   `stockflow/README.md`.
-- **Auth**: session login/logout (`Web/Auth/LoginController`, `AuthService`).
+- **Auth**: session login/logout plus public retail registration
+  (`Web/Auth/LoginController`, `Web/Auth/RegisterController`, `AuthService`).
 - **Authorization**: Laratrust roles/permissions (teams enabled), `ProductPolicy`,
   `PriceListPolicy` (also covers `PriceListItem`), Admin UI for user/role management
   and a read-only permission matrix.
@@ -92,9 +93,10 @@ matrix; demo users seeded by `DemoUserSeeder` (SuperAdmin) and
   `OrderService`, `PaymentService`, `QuoteService`, `PurchaseOrderService`,
   `ImportService`, `AuditService`, `RolePermissionService`, `ReportService`, and
   `DashboardService` have real logic.
-- **Catalog module** (first full business module, the template for future ones):
-  products/categories/suppliers/price-lists CRUD, Redis-cached reads (tag `catalog`,
-  flushed on every write), vendor-scoped price-list-item ownership.
+- **Catalog/storefront module** (first full business module, the template for
+  future ones): products/categories/suppliers/price-lists CRUD, Redis-cached reads
+  (tag `catalog`, flushed on every write), vendor-scoped price-list-item ownership,
+  public product browsing, and a session-backed guest cart.
 - **Stock engine** (second full business module — see `stockflow/README.md` §"The
   stock engine" for the full write-up): `StockService::purchaseIn() / reserve() /
   release() / confirmSale() / transfer() / adjust() / reconcile()` — every mutation
@@ -145,7 +147,11 @@ matrix; demo users seeded by `DemoUserSeeder` (SuperAdmin) and
   Cart is session-backed (`CartService`, `[product_id => quantity]` in the
   Laravel session) — deliberately not a DB table, since requirement #1 only
   requires *order creation* to be database-backed, and prices are always looked
-  up fresh rather than cached in the session.
+  up fresh rather than cached in the session. Cart add/update validates the desired
+  total quantity against live `StockAvailabilityService` data, rejects quantities
+  above available stock with a generic message, and never reserves or mutates stock
+  before checkout. Public registration assigns only the Retail Customer role and
+  preserves the guest cart so checkout redirects can continue after registration.
 - **B2B procurement module** (fourth full business module — RFQ → quote → PO →
   approval → settlement): two state machines, `QuoteService` (`draft → sent →
   accepted | rejected | expired`) and `PurchaseOrderService` (`pending_approval →
@@ -268,9 +274,9 @@ matrix; demo users seeded by `DemoUserSeeder` (SuperAdmin) and
   - `App\Http\Middleware\SecurityHeaders` (registered globally in
     `bootstrap/app.php`) sets `X-Content-Type-Options`, `X-Frame-Options`,
     `Referrer-Policy`, `Permissions-Policy` on every response, plus
-    `Strict-Transport-Security` on HTTPS requests. No CSP yet — the React bundle
-    has no nonce plumbing and a naive CSP would break inline styles some UI
-    libraries rely on; deliberately deferred, not an oversight.
+    `Strict-Transport-Security` on HTTPS requests and a `Content-Security-Policy`
+    that defaults to self-origin while allowing local Vite HTTP/WebSocket origins
+    for development/test.
   - Code quality gate: `pint.json` (Laravel preset), `phpstan.neon` +
     `phpstan-baseline.neon` (Larastan, level 5, 250 pre-existing findings
     baselined — mostly Larastan false positives on enum `casts()` methods, not
@@ -381,6 +387,10 @@ matrix; demo users seeded by `DemoUserSeeder` (SuperAdmin) and
   `php artisan passport:install`) per environment before real OAuth token issuance.
   API feature tests generate throwaway keys in `setUp()` so clean test checkouts do
   not depend on committed secrets.
+- **Generated analysis/test caches stay out of git.** `storage/phpstan/`,
+  `.phpstan.cache/`, and `.phpunit.cache/` are ignored. If they ever show up in
+  `git status`, remove them from the index with `git rm -r --cached` rather than
+  deleting the working cache as part of an unrelated feature change.
 - **Report filters only apply the (date range, product, warehouse, status, user)
   dimensions that actually exist on the underlying table — not all five on every
   report.** Deliberate, not an oversight: Payments has no product/warehouse column

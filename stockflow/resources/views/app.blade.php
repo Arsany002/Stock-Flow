@@ -7,6 +7,7 @@
 
     <title inertia>{{ config('app.name', 'StockFlow') }}</title>
 
+    @viteReactRefresh
     @vite(['resources/css/app.css', 'resources/js/app.jsx'])
     @inertiaHead
 </head>

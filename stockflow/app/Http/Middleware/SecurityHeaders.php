@@ -41,6 +41,7 @@ class SecurityHeaders
 
         if ($isLocal) {
             $scriptSrc = array_merge($scriptSrc, ["'unsafe-inline'", "'unsafe-eval'", 'http://localhost:5173', 'http://127.0.0.1:5173']);
+            $styleSrc = array_merge($styleSrc, ['http://localhost:5173', 'http://127.0.0.1:5173']);
             $connectSrc = array_merge($connectSrc, $viteOrigins);
         }
 
