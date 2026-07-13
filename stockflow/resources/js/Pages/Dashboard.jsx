@@ -111,6 +111,12 @@ export default function Dashboard({ kpis }) {
                         <PermissionGate permission="audit.read">
                             <QuickLink href="/admin/audit-log" label="Audit log" />
                         </PermissionGate>
+                        <PermissionGate permission="access.manage">
+                            <QuickLink href="/admin/access/company-hours" label="Company working hours" />
+                        </PermissionGate>
+                        <PermissionGate permission="access.manage">
+                            <QuickLink href="/admin/access/permission-windows" label="Role/permission access windows" />
+                        </PermissionGate>
                     </div>
                 </div>
             </div>

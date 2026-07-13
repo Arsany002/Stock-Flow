@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 COMPOSE := docker compose
 
-.PHONY: help start stop restart build logs shell migrate fresh test pint stan quality npm-dev npm-build
+.PHONY: help start stop restart build logs shell migrate fresh test pint pint-fix stan quality npm-dev npm-build vite-fresh
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -51,3 +51,7 @@ npm-dev: ## Follow the Vite dev server logs (already running as the `vite` servi
 
 npm-build: ## Build production frontend assets inside the vite container
 	$(COMPOSE) run --rm vite npm run build
+
+vite-fresh: ## Fix a blank/white-screen page caused by a stale Vite dep-optimization cache (import.meta.glob resolving empty)
+	$(COMPOSE) exec vite sh -c "rm -rf node_modules/.vite"
+	$(COMPOSE) restart vite
